@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+dist
+.prisma
+*.db
+*.db-journal
+.env.local
+.DS_Store
+coverage
+tsconfig.tsbuildinfo
+playwright-report
+test-results
+/tmp

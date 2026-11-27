@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String   @id
+  username        String   @unique
+  name            String
+  email           String   @unique
+  passwordHash    String
+  balance         Float
+  startingBalance Float
+  bio             String   @default("")
+  avatarColor     String
+  isDemo          Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  positions     Position[]
+  trades        Trade[]
+  comments      Comment[]
+  markets       Market[]       @relation("CreatedMarkets")
+  notifications Notification[]
+  bookmarks     Bookmark[]
+  pnlEntries    PnlEntry[]
+}
+
+model Market {
+  id             String    @id
+  slug           String    @unique
+  question       String
+  description    String
+  type           String
+  topic          String
+  closeAt        DateTime
+  createdAt      DateTime
+  resolvedAt     DateTime?
+  resolution     String?
+  resolutionProb Float?
+  resolutionNote String    @default("")
+  poolYes        Float     @default(0)
+  poolNo         Float     @default(0)
+  p              Float     @default(0.5)
+  probability    Float     @default(0.5)
+  pot            Float     @default(0)
+  ante           Float     @default(0)
+  volume         Float     @default(0)
+  traderCount    Int       @default(0)
+  creatorId      String
+  creator        User      @relation("CreatedMarkets", fields: [creatorId], references: [id])
+
+  answers    Answer[]
+  trades     Trade[]
+  comments   Comment[]
+  positions  Position[]
+  points     ProbPoint[]
+  bookmarks  Bookmark[]
+  pnlEntries PnlEntry[]
+
+  @@index([topic, createdAt])
+  @@index([resolvedAt])
+}
+
+model Answer {
+  id          String @id
+  marketId    String
+  market      Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  text        String
+  sortIndex   Int
+  pool        Float
+  probability Float
+
+  @@index([marketId, sortIndex])
+}
+
+model Position {
+  id          String @id
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketId    String
+  market      Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  answerId    String @default("")
+  sharesYes   Float  @default(0)
+  sharesNo    Float  @default(0)
+  shares      Float  @default(0)
+  invested     Float @default(0)
+  costBasisYes Float @default(0)
+  costBasisNo  Float @default(0)
+  realizedPnl  Float @default(0)
+  payout       Float @default(0)
+
+  @@unique([userId, marketId, answerId])
+  @@index([marketId])
+  @@index([userId])
+}
+
+model Trade {
+  id         String   @id
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketId   String
+  market     Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  answerId   String   @default("")
+  outcome    String
+  side       String
+  amount     Float
+  shares     Float
+  probBefore Float
+  probAfter  Float
+  createdAt  DateTime
+
+  @@index([marketId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Comment {
+  id        String    @id
+  marketId  String
+  market    Market    @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  body      String
+  createdAt DateTime
+
+  @@index([marketId, createdAt])
+}
+
+model ProbPoint {
+  id          String   @id
+  marketId    String
+  market      Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  probability Float
+  snapshot    String
+  createdAt   DateTime
+
+  @@index([marketId, createdAt])
+}
+
+model Notification {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  href      String
+  read      Boolean  @default(false)
+  createdAt DateTime
+
+  @@index([userId, createdAt])
+}
+
+model Bookmark {
+  userId    String
+  marketId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, marketId])
+}
+
+model PnlEntry {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  amount    Float
+  createdAt DateTime
+
+  @@index([userId, createdAt])
+}

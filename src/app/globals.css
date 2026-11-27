@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background: #f8f7f4;
+  color: #1c1e21;
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: #e4e8ed;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+input[type="range"] {
+  accent-color: #3d4f63;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition duration-150;
+    @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-actionDeep text-white hover:bg-[#343e49];
+  }
+
+  .btn-yes {
+    @apply btn border border-[#D5E4DC] bg-yesTint text-yes hover:bg-[#E3EFE8];
+  }
+
+  .btn-no {
+    @apply btn border border-[#EADDDD] bg-noTint text-no hover:bg-[#F3E4E4];
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-secondary hover:bg-pill hover:text-ink;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink outline-none transition;
+    @apply placeholder:text-muted focus:border-action focus:ring-2 focus:ring-action/15;
+  }
+
+  .surface {
+    @apply rounded-2xl border border-line bg-card shadow-card;
+  }
+}
