@@ -18,7 +18,7 @@ export function MarketCard({ market, signedIn }: { market: Card; signedIn: boole
   const resolved = resolutionLabel(market.resolution, market.resolutionProb, market.answers, market.type);
 
   return (
-    <article className="surface p-4 transition hover:border-[#D9D5CC]" data-testid="market-card" data-slug={market.slug}>
+    <article className="surface p-4 transition hover:border-secondary/30" data-testid="market-card" data-slug={market.slug}>
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs text-secondary">
@@ -76,12 +76,47 @@ export function MarketCard({ market, signedIn }: { market: Card; signedIn: boole
             {formatClose(market.closeAt)}
           </p>
         </div>
-        <Link href={`/market/${market.slug}`} className="shrink-0 pt-5 text-right">
+        <Link href={`/market/${market.slug}`} className="flex shrink-0 flex-col items-end pt-5 text-right">
           <div className="num text-[28px] font-medium leading-none tracking-tight text-ink">{formatPercent(headline)}</div>
+          <ChangePill change={market.change24h} />
+          <Sparkline values={market.spark} />
           <div className="mt-1 max-w-[88px] truncate text-[11px] uppercase tracking-wide text-muted">{headlineLabel}</div>
         </Link>
       </div>
     </article>
+  );
+}
+
+function ChangePill({ change }: { change: number | null }) {
+  if (change === null || Math.abs(change) < 0.005) return null;
+  const up = change > 0;
+  return (
+    <span className={cn("num mt-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium", up ? "bg-yesTint text-yes" : "bg-noTint text-no")}>
+      {up ? "+" : ""}
+      {Math.round(change * 100)}%
+    </span>
+  );
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(0.02, max - min);
+  const width = 72;
+  const height = 22;
+  const d = values
+    .map((value, index) => {
+      const x = (index / (values.length - 1)) * width;
+      const y = height - ((value - min) / span) * (height - 2) - 1;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const up = values[values.length - 1] >= values[0];
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="mt-1" aria-hidden>
+      <path d={d} fill="none" stroke={up ? "var(--yes)" : "var(--no)"} strokeWidth="1.4" />
+    </svg>
   );
 }
 

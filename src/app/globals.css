@@ -4,6 +4,52 @@
 
 :root {
   color-scheme: light;
+  --canvas: #f8f7f4;
+  --card: #ffffff;
+  --warm: #fdfcfa;
+  --pill: #f1efea;
+  --line: #e6e3dc;
+  --ink: #1c1e21;
+  --secondary: #5b616a;
+  --muted: #8a8f98;
+  --yes: #4e7a65;
+  --yes-tint: #edf3f0;
+  --no: #a65e5e;
+  --no-tint: #f7efef;
+  --action: #3d4f63;
+  --action-deep: #2a333d;
+  --action-ink: #ffffff;
+  --action-hover: #343e49;
+  --yes-line: #d5e4dc;
+  --no-line: #eadddd;
+  --yes-hover: #e3efe8;
+  --no-hover: #f3e4e4;
+  --selection: #e4e8ed;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #141311;
+  --card: #1c1b19;
+  --warm: #201f1c;
+  --pill: #2a2825;
+  --line: #3c3934;
+  --ink: #f3f0e8;
+  --secondary: #b7b1a6;
+  --muted: #8c867c;
+  --yes: #8fb5a1;
+  --yes-tint: #24302b;
+  --no: #c99999;
+  --no-tint: #332828;
+  --action: #9aabb8;
+  --action-deep: #d5dde6;
+  --action-ink: #1a1916;
+  --action-hover: #e4eaf0;
+  --yes-line: #345246;
+  --no-line: #4a3535;
+  --yes-hover: #2c3b35;
+  --no-hover: #3d2e2e;
+  --selection: #3a424c;
 }
 
 html,
@@ -12,14 +58,14 @@ body {
 }
 
 body {
-  background: #f8f7f4;
-  color: #1c1e21;
+  background: var(--canvas);
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: #e4e8ed;
+  background: var(--selection);
 }
 
 button,
@@ -30,7 +76,7 @@ textarea {
 }
 
 input[type="range"] {
-  accent-color: #3d4f63;
+  accent-color: var(--action);
 }
 
 .no-scrollbar {
@@ -50,15 +96,30 @@ input[type="range"] {
   }
 
   .btn-primary {
-    @apply btn bg-actionDeep text-white hover:bg-[#343e49];
+    @apply btn bg-actionDeep;
+    color: var(--action-ink);
+  }
+
+  .btn-primary:hover {
+    background: var(--action-hover);
   }
 
   .btn-yes {
-    @apply btn border border-[#D5E4DC] bg-yesTint text-yes hover:bg-[#E3EFE8];
+    @apply btn bg-yesTint text-yes;
+    border: 1px solid var(--yes-line);
+  }
+
+  .btn-yes:hover {
+    background: var(--yes-hover);
   }
 
   .btn-no {
-    @apply btn border border-[#EADDDD] bg-noTint text-no hover:bg-[#F3E4E4];
+    @apply btn bg-noTint text-no;
+    border: 1px solid var(--no-line);
+  }
+
+  .btn-no:hover {
+    background: var(--no-hover);
   }
 
   .btn-ghost {
@@ -66,8 +127,13 @@ input[type="range"] {
   }
 
   .field {
-    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink outline-none transition;
-    @apply placeholder:text-muted focus:border-action focus:ring-2 focus:ring-action/15;
+    @apply w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none transition;
+    @apply placeholder:text-muted;
+  }
+
+  .field:focus {
+    border-color: var(--action);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--action) 18%, transparent);
   }
 
   .surface {

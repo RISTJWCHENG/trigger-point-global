@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { cn, formatDateTime, formatPercent } from "@/lib/format";
 import type { AnswerView, PointView } from "@/lib/types";
 
-const COLORS = ["#3D4F63", "#4E7A65", "#A65E5E", "#8C7355", "#5E7388", "#6E6A62", "#4F5E56", "#7A6A78"];
+const COLORS = ["var(--action)", "var(--yes)", "var(--no)", "#8C7355", "#5E7388", "#6E6A62", "#4F5E56", "#7A6A78"];
 const FRAMES = ["1D", "1W", "1M", "ALL"] as const;
 
 export function ProbChart({
@@ -79,7 +79,7 @@ export function ProbChart({
               key={item}
               type="button"
               onClick={() => setFrame(item)}
-              className={cn("rounded-md px-2 py-1", frame === item ? "bg-white text-ink shadow-card" : "text-secondary")}
+              className={cn("rounded-md px-2 py-1", frame === item ? "bg-card text-ink shadow-card" : "text-secondary")}
             >
               {item}
             </button>
@@ -97,8 +97,8 @@ export function ProbChart({
         >
           {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
             <g key={tick}>
-              <line x1={pad.l} x2={width - pad.r} y1={yAt(tick)} y2={yAt(tick)} stroke="#E6E3DC" strokeWidth="1" />
-              <text x={pad.l - 8} y={yAt(tick) + 3} textAnchor="end" fill="#8A8F98" fontSize="11">
+              <line x1={pad.l} x2={width - pad.r} y1={yAt(tick)} y2={yAt(tick)} stroke="var(--line)" strokeWidth="1" />
+              <text x={pad.l - 8} y={yAt(tick) + 3} textAnchor="end" fill="var(--muted)" fontSize="11">
                 {Math.round(tick * 100)}
               </text>
             </g>
@@ -108,7 +108,7 @@ export function ProbChart({
               d={`${series[0].values
                 .map((value, index) => `${index === 0 ? "M" : "L"}${xAt(shown[index].t).toFixed(1)},${yAt(value).toFixed(1)}`)
                 .join(" ")} L${xAt(t1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(t0).toFixed(1)},${yAt(0).toFixed(1)} Z`}
-              fill="#3D4F63"
+              fill="var(--action)"
               opacity="0.08"
             />
           )}
@@ -125,7 +125,7 @@ export function ProbChart({
             />
           ))}
           {hoverPoint && (
-            <line x1={hoverX} x2={hoverX} y1={pad.t} y2={height - pad.b} stroke="#C9C4BA" strokeDasharray="3 3" />
+            <line x1={hoverX} x2={hoverX} y1={pad.t} y2={height - pad.b} stroke="var(--muted)" strokeDasharray="3 3" />
           )}
           {hoverPoint &&
             series.map((item) => (
@@ -134,7 +134,7 @@ export function ProbChart({
                 cx={hoverX}
                 cy={yAt(item.values[hover ?? 0] ?? 0)}
                 r="3.5"
-                fill="#fff"
+                fill="var(--card)"
                 stroke={item.color}
                 strokeWidth="1.6"
               />
@@ -142,7 +142,7 @@ export function ProbChart({
         </svg>
         {hoverPoint && (
           <div
-            className="pointer-events-none absolute top-3 z-10 w-max max-w-[220px] rounded-lg border border-line bg-white px-2.5 py-2 text-xs shadow-card"
+            className="pointer-events-none absolute top-3 z-10 w-max max-w-[220px] rounded-lg border border-line bg-card px-2.5 py-2 text-xs shadow-card"
             style={{ left: `clamp(8px, ${(hoverX / width) * 100}%, calc(100% - 180px))` }}
           >
             <div className="text-muted">{formatDateTime(hoverPoint.t)}</div>

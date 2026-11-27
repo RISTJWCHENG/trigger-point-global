@@ -11,6 +11,7 @@ import type {
   NotificationView,
   PortfolioData,
   PositionRow,
+  RailTrade,
   TopicSummary,
   TradeHistoryRow,
 } from "./types";
@@ -32,6 +33,7 @@ type MarketRecord = {
   resolutionProb: number | null;
   creator: Creator;
   answers: { id: string; text: string; probability: number; pool: number; sortIndex: number }[];
+  points?: { createdAt: Date; probability: number; snapshot: string }[];
 };
 
 function asType(type: string): "BINARY" | "MULTIPLE" {
@@ -59,12 +61,37 @@ function toCard(market: MarketRecord): MarketCard {
       probability: answer.probability,
       pool: answer.pool,
     })),
+    ...seriesForCard(market),
+  };
+}
+
+function seriesForCard(market: MarketRecord): { change24h: number | null; spark: number[] } {
+  const points = market.points ?? [];
+  if (!points.length) return { change24h: null, spark: [] };
+  const answers = [...market.answers].sort((a, b) => b.probability - a.probability);
+  const leader = answers[0]?.id;
+  const readPoint = (point: { probability: number; snapshot: string }) => {
+    const snapshot = safeSnapshot(point.snapshot);
+    if (market.type !== "MULTIPLE") return snapshot.YES ?? point.probability;
+    const value = leader ? snapshot[leader] : undefined;
+    return typeof value === "number" ? value : point.probability;
+  };
+  const values = points.map(readPoint);
+  const latest = points[points.length - 1];
+  const prior = [...points].reverse().find((point) => latest.createdAt.getTime() - point.createdAt.getTime() >= 86_400_000);
+  const priorValue = prior ? readPoint(prior) : null;
+  const step = Math.max(1, Math.ceil(values.length / 18));
+  const spark = values.filter((_, index) => index % step === 0 || index === values.length - 1);
+  return {
+    change24h: priorValue === null ? null : values[values.length - 1] - priorValue,
+    spark,
   };
 }
 
 const marketInclude = {
   creator: { select: creatorSelect },
   answers: true,
+  points: { select: { createdAt: true, probability: true, snapshot: true }, orderBy: { createdAt: "asc" as const } },
 } as const;
 
 export async function getFeed(filters: {
@@ -166,6 +193,11 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
       comments: { include: { user: { select: creatorSelect } }, orderBy: { createdAt: "asc" } },
       trades: { include: { user: { select: creatorSelect } }, orderBy: { createdAt: "desc" }, take: 80 },
       positions: { include: { user: { select: creatorSelect } } },
+      limitOrders: {
+        where: { status: "OPEN" },
+        include: { user: { select: creatorSelect } },
+        orderBy: { limitProb: "desc" },
+      },
       bookmarks: { where: { userId: viewerId ?? "__none__" }, select: { userId: true } },
     },
   });
@@ -267,6 +299,14 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
       createdAt: trade.createdAt.toISOString(),
     })),
     holders,
+    limitOrders: market.limitOrders.map((order) => ({
+      id: order.id,
+      user: order.user,
+      outcome: order.outcome,
+      limitProb: order.limitProb,
+      remaining: order.remaining,
+      mine: order.userId === viewerId,
+    })),
   };
 }
 
@@ -544,6 +584,37 @@ export async function getLeaderboard(window: "all" | "week" | "month", metric: "
     .slice(0, 25)
     .map((row, index) => ({ ...row, rank: index + 1 }));
   return rows;
+}
+
+export async function getHomeRail(): Promise<{ movers: MarketCard[]; trades: RailTrade[] }> {
+  const markets = await getFeed({});
+  const movers = markets
+    .filter((market) => !market.resolution && market.change24h !== null && Math.abs(market.change24h) >= 0.005)
+    .sort((a, b) => Math.abs(b.change24h ?? 0) - Math.abs(a.change24h ?? 0))
+    .slice(0, 5);
+  const trades = await prisma.trade.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 8,
+    include: {
+      user: { select: creatorSelect },
+      market: { select: { slug: true, question: true } },
+    },
+  });
+  return {
+    movers,
+    trades: trades.map((trade) => ({
+      id: trade.id,
+      username: trade.user.username,
+      name: trade.user.name,
+      avatarColor: trade.user.avatarColor,
+      slug: trade.market.slug,
+      question: trade.market.question,
+      side: trade.side,
+      outcome: trade.outcome,
+      amount: trade.amount,
+      createdAt: trade.createdAt.toISOString(),
+    })),
+  };
 }
 
 export async function getNotifications(userId: string): Promise<NotificationView[]> {

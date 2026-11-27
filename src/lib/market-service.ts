@@ -13,6 +13,7 @@ import {
   type ResolveInput,
   type Wallet,
 } from "./ledger";
+import { fillLimitOrders, type LimitOrderState } from "./limits";
 
 type Tx = Prisma.TransactionClient;
 
@@ -273,6 +274,7 @@ export async function placeBet(
         createdAt,
       },
     });
+    await matchLimits(tx, market, dbMarket.slug);
     return {
       shares: fill.shares,
       amount: fill.amount,
@@ -340,6 +342,7 @@ export async function sellShares(
         createdAt,
       },
     });
+    await matchLimits(tx, market, dbMarket.slug);
     return {
       shares: fill.shares,
       amount: fill.amount,
@@ -360,10 +363,22 @@ export async function settleMarket(userId: string, slug: string, input: ResolveI
     });
     if (!dbMarket) throw new TradeError("Market not found", 404);
     if (dbMarket.creatorId !== userId) throw new TradeError("Only the market creator can resolve it", 403);
-    const ids = [...new Set([dbMarket.creatorId, ...dbMarket.positions.map((position) => position.userId)])];
+    const openLimits = await tx.limitOrder.findMany({ where: { marketId: dbMarket.id, status: "OPEN" } });
+    const ids = [...new Set([dbMarket.creatorId, ...dbMarket.positions.map((position) => position.userId), ...openLimits.map((order) => order.userId)])];
     const users = await tx.user.findMany({ where: { id: { in: ids } } });
     const wallets = new Map<string, Wallet>(users.map((user) => [user.id, { id: user.id, balance: user.balance }]));
     const market = toLedger(dbMarket);
+    for (const order of openLimits) {
+      const wallet = wallets.get(order.userId);
+      if (!wallet || order.remaining <= 0) continue;
+      wallet.balance += order.remaining;
+    }
+    if (openLimits.length) {
+      await tx.limitOrder.updateMany({
+        where: { marketId: dbMarket.id, status: "OPEN" },
+        data: { status: "CANCELLED", remaining: 0 },
+      });
+    }
     const result = resolveMarket(market, wallets, dbMarket.creatorId, input);
     const createdAt = new Date();
     await tx.market.update({
@@ -513,5 +528,164 @@ export async function markNotificationsRead(userId: string, id?: string) {
   await prisma.notification.updateMany({
     where: { userId, ...(id ? { id } : {}), read: false },
     data: { read: true },
+  });
+}
+
+async function matchLimits(tx: Tx, market: LedgerMarket, slug: string) {
+  if (market.type !== "BINARY" || market.resolution) return;
+  const rows = await tx.limitOrder.findMany({ where: { marketId: market.id, status: "OPEN" } });
+  if (!rows.length) return;
+  const users = await tx.user.findMany({ where: { id: { in: rows.map((row) => row.userId) } } });
+  const wallets = new Map<string, Wallet>(users.map((user) => [user.id, { id: user.id, balance: user.balance }]));
+  const orders: LimitOrderState[] = rows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    outcome: row.outcome === "NO" ? "NO" : "YES",
+    limitProb: row.limitProb,
+    remaining: row.remaining,
+    status: "OPEN",
+    createdAt: row.createdAt.getTime(),
+  }));
+  const fills = fillLimitOrders(market, wallets, orders);
+  if (!fills.length) return;
+  await saveMarketState(tx, market, 0);
+  for (const user of users) {
+    const wallet = wallets.get(user.id);
+    if (!wallet) continue;
+    await tx.user.update({ where: { id: user.id }, data: { balance: wallet.balance } });
+  }
+  for (const order of orders) {
+    await tx.limitOrder.update({
+      where: { id: order.id },
+      data: { remaining: order.remaining, status: order.status },
+    });
+  }
+  const touched = new Set<string>();
+  for (const fill of fills) {
+    if (touched.has(fill.userId)) continue;
+    touched.add(fill.userId);
+    await savePosition(tx, market, fill.userId, "");
+  }
+  const createdAt = new Date();
+  for (const fill of fills) {
+    await tx.trade.create({
+      data: {
+        id: uid("trd"),
+        userId: fill.userId,
+        marketId: market.id,
+        answerId: "",
+        outcome: fill.outcome,
+        side: "BUY",
+        amount: fill.amount,
+        shares: fill.shares,
+        probBefore: fill.probBefore,
+        probAfter: fill.probAfter,
+        createdAt,
+      },
+    });
+    await tx.probPoint.create({
+      data: { id: uid("pt"), marketId: market.id, probability: fill.probAfter, snapshot: fill.snapshot, createdAt },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId: fill.userId,
+        type: "TRADE",
+        title: "Limit order filled",
+        body: `Bought ${fill.shares.toFixed(1)} ${fill.outcome} for ${fill.amount.toFixed(2)} TP.`,
+        href: `/market/${slug}`,
+        createdAt,
+      },
+    });
+  }
+}
+
+export async function placeLimitOrder(
+  userId: string,
+  slug: string,
+  input: { outcome?: "YES" | "NO"; limitProb: number; amount: number },
+) {
+  const amount = input.amount;
+  const limitProb = input.limitProb;
+  if (!Number.isFinite(amount) || amount < MIN_BET) throw new TradeError(`Minimum order is ${MIN_BET} TP`);
+  if (!Number.isFinite(limitProb) || limitProb < 0.01 || limitProb > 0.99) {
+    throw new TradeError("Limit probability must be between 1% and 99%");
+  }
+  if (input.outcome !== "YES" && input.outcome !== "NO") throw new TradeError("Choose YES or NO");
+  const outcome = input.outcome;
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    if (user.balance + 1e-8 < amount) throw new TradeError("Not enough TP in your balance");
+    const dbMarket = await loadOpen(tx, slug);
+    if (dbMarket.resolution) throw new TradeError("This market is already resolved");
+    if (dbMarket.type !== "BINARY") throw new TradeError("Limit orders are available on binary markets");
+    const market = toLedger(dbMarket);
+    await tx.user.update({ where: { id: user.id }, data: { balance: user.balance - amount } });
+    const orderId = uid("ord");
+    await tx.limitOrder.create({
+      data: {
+        id: orderId,
+        userId,
+        marketId: market.id,
+        outcome,
+        limitProb,
+        amount,
+        remaining: amount,
+        status: "OPEN",
+      },
+    });
+    await matchLimits(tx, market, slug);
+    const order = await tx.limitOrder.findUniqueOrThrow({ where: { id: orderId } });
+    const updated = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    return {
+      id: order.id,
+      status: order.status,
+      remaining: order.remaining,
+      limitProb: order.limitProb,
+      outcome: order.outcome,
+      balance: updated.balance,
+      probability: market.probability,
+    };
+  });
+}
+
+export async function cancelLimitOrderById(userId: string, orderId: string) {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.limitOrder.findUnique({ where: { id: orderId } });
+    if (!order || order.userId !== userId) throw new TradeError("Order not found", 404);
+    if (order.status !== "OPEN") throw new TradeError("That order is no longer open");
+    await tx.user.update({ where: { id: userId }, data: { balance: { increment: order.remaining } } });
+    await tx.limitOrder.update({ where: { id: orderId }, data: { status: "CANCELLED", remaining: 0 } });
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    return { balance: user.balance, refunded: order.remaining };
+  });
+}
+
+export async function claimDailyBonus(userId: string) {
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    if (user.lastBonusAt && user.lastBonusAt >= start) {
+      return { awarded: false, balance: user.balance, message: "Today's bonus is already claimed." };
+    }
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: { balance: user.balance + 50, lastBonusAt: new Date() },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId,
+        type: "BONUS",
+        title: "Daily bonus",
+        body: "50 TP added to your balance.",
+        href: "/portfolio",
+        createdAt: new Date(),
+      },
+    });
+    return { awarded: true, balance: updated.balance, message: "50 TP added." };
   });
 }

@@ -25,7 +25,7 @@ export function NotificationsView({ items }: { items: NotificationView[] }) {
           </button>
         )}
       </div>
-      <ul className="mt-4 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
+      <ul className="mt-4 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-card">
         {items.length === 0 && <li className="px-4 py-8 text-sm text-secondary">Nothing yet. Trades, resolutions, and replies land here.</li>}
         {items.map((item) => (
           <li key={item.id}>

@@ -25,6 +25,8 @@ export type MarketCard = {
   resolutionProb: number | null;
   creator: Creator;
   answers: AnswerView[];
+  change24h: number | null;
+  spark: number[];
 };
 
 export type HoldingView = {
@@ -88,6 +90,16 @@ export type MarketDetail = MarketCard & {
   comments: CommentView[];
   trades: TradeView[];
   holders: HolderView[];
+  limitOrders: LimitOrderView[];
+};
+
+export type LimitOrderView = {
+  id: string;
+  user: Creator;
+  outcome: string;
+  limitProb: number;
+  remaining: number;
+  mine: boolean;
 };
 
 export type PositionRow = {
@@ -147,6 +159,19 @@ export type NotificationView = {
   body: string;
   href: string;
   read: boolean;
+  createdAt: string;
+};
+
+export type RailTrade = {
+  id: string;
+  username: string;
+  name: string;
+  avatarColor: string;
+  slug: string;
+  question: string;
+  side: string;
+  outcome: string;
+  amount: number;
   createdAt: string;
 };
 

@@ -17,8 +17,9 @@ model User {
   startingBalance Float
   bio             String   @default("")
   avatarColor     String
-  isDemo          Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  isDemo          Boolean   @default(false)
+  lastBonusAt     DateTime?
+  createdAt       DateTime  @default(now())
 
   positions     Position[]
   trades        Trade[]
@@ -27,6 +28,7 @@ model User {
   notifications Notification[]
   bookmarks     Bookmark[]
   pnlEntries    PnlEntry[]
+  limitOrders   LimitOrder[]
 }
 
 model Market {
@@ -58,8 +60,9 @@ model Market {
   comments   Comment[]
   positions  Position[]
   points     ProbPoint[]
-  bookmarks  Bookmark[]
-  pnlEntries PnlEntry[]
+  bookmarks   Bookmark[]
+  pnlEntries  PnlEntry[]
+  limitOrders LimitOrder[]
 
   @@index([topic, createdAt])
   @@index([resolvedAt])
@@ -96,6 +99,23 @@ model Position {
   @@unique([userId, marketId, answerId])
   @@index([marketId])
   @@index([userId])
+}
+
+model LimitOrder {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  outcome   String
+  limitProb Float
+  amount    Float
+  remaining Float
+  status    String
+  createdAt DateTime @default(now())
+
+  @@index([marketId, status])
+  @@index([userId, status])
 }
 
 model Trade {

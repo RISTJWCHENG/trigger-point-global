@@ -45,7 +45,7 @@ export default async function LeaderboardPage({
               ["month", "Monthly"],
             ] as const
           ).map(([id, label]) => (
-            <Link key={id} href={href({ window: id })} className={cn("rounded-md px-3 py-1.5", window === id ? "bg-white text-ink shadow-card" : "text-secondary")}>
+            <Link key={id} href={href({ window: id })} className={cn("rounded-md px-3 py-1.5", window === id ? "bg-card text-ink shadow-card" : "text-secondary")}>
               {label}
             </Link>
           ))}
@@ -57,7 +57,7 @@ export default async function LeaderboardPage({
               ["volume", "Volume"],
             ] as const
           ).map(([id, label]) => (
-            <Link key={id} href={href({ metric: id })} className={cn("rounded-md px-3 py-1.5", metric === id ? "bg-white text-ink shadow-card" : "text-secondary")}>
+            <Link key={id} href={href({ metric: id })} className={cn("rounded-md px-3 py-1.5", metric === id ? "bg-card text-ink shadow-card" : "text-secondary")}>
               {label}
             </Link>
           ))}

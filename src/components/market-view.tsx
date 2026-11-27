@@ -15,6 +15,9 @@ import type { ShellUser as Session } from "./shell";
 
 export function MarketView({ market, user }: { market: MarketDetail; user: Session | null }) {
   const [sheet, setSheet] = useState(false);
+  const [answerId, setAnswerId] = useState(
+    [...market.answers].sort((a, b) => b.probability - a.probability)[0]?.id ?? "",
+  );
   const topicId = TOPICS.find((topic) => topic.label === market.topic)?.id ?? "all";
   const leader = [...market.answers].sort((a, b) => b.probability - a.probability)[0];
   const headline = market.type === "MULTIPLE" && leader ? leader.probability : market.probability;
@@ -56,11 +59,20 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
         <div className="surface mt-5 p-4">
           <ProbChart points={market.points} answers={market.answers} type={market.type} />
         </div>
+        {market.type === "MULTIPLE" && !market.resolution && (
+          <OutcomeBoard market={market} selected={answerId} onSelect={setAnswerId} />
+        )}
         <Tabs market={market} signedIn={Boolean(user)} />
       </div>
       <aside className="hidden lg:block">
         <div className="sticky top-6">
-          <BetPanel market={market} balance={user?.balance ?? null} signedIn={Boolean(user)} />
+          <BetPanel
+            market={market}
+            balance={user?.balance ?? null}
+            signedIn={Boolean(user)}
+            selectedAnswerId={answerId}
+            onSelectAnswer={setAnswerId}
+          />
         </div>
       </aside>
 
@@ -87,11 +99,54 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
                 Close
               </button>
             </div>
-            <BetPanel market={market} balance={user?.balance ?? null} signedIn={Boolean(user)} />
+            <BetPanel
+              market={market}
+              balance={user?.balance ?? null}
+              signedIn={Boolean(user)}
+              selectedAnswerId={answerId}
+              onSelectAnswer={setAnswerId}
+            />
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function OutcomeBoard({
+  market,
+  selected,
+  onSelect,
+}: {
+  market: MarketDetail;
+  selected: string;
+  onSelect: (id: string) => void;
+}) {
+  const ranked = [...market.answers].sort((a, b) => b.probability - a.probability);
+  return (
+    <section className="surface mt-4 divide-y divide-line" data-testid="outcome-board">
+      {ranked.map((answer) => (
+        <div key={answer.id} className={cn("flex items-center gap-3 px-4 py-3", selected === answer.id && "bg-pill/60")}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="truncate font-medium">{answer.text}</span>
+              <span className="num shrink-0">{formatPercent(answer.probability, 1)}</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-pill">
+              <div className="h-full rounded-full bg-action" style={{ width: `${Math.max(1.5, answer.probability * 100)}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid={`answer-${answer.id}`}
+            onClick={() => onSelect(answer.id)}
+            className={cn("btn-yes h-8 shrink-0 px-3 text-xs", selected === answer.id && "ring-1 ring-yes")}
+          >
+            Yes
+          </button>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -124,10 +179,10 @@ function Actions({ market, user, canResolve }: { market: MarketDetail; user: Ses
   return (
     <>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" onClick={() => void bookmark()} className="btn h-8 border border-line bg-white px-3 text-xs text-ink hover:bg-pill">
+        <button type="button" onClick={() => void bookmark()} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
           {saved ? "Saved" : "Save"}
         </button>
-        <button type="button" onClick={() => void share()} className="btn h-8 border border-line bg-white px-3 text-xs text-ink hover:bg-pill">
+        <button type="button" onClick={() => void share()} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
           Share
         </button>
         {canResolve && (

@@ -62,6 +62,7 @@ const userSelect = {
   bio: true,
   avatarColor: true,
   isDemo: true,
+  lastBonusAt: true,
   createdAt: true,
 } as const;
 

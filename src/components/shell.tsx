@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Avatar } from "./avatar";
 import { cn, formatTp } from "@/lib/format";
 
@@ -76,7 +76,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
                 <link.icon />
                 <span className="flex-1">{link.label}</span>
                 {link.label === "Notifications" && user && user.unread > 0 && (
-                  <span className="num rounded-full bg-actionDeep px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  <span className="num rounded-full bg-actionDeep px-1.5 py-0.5 text-[10px] font-medium text-[var(--action-ink)]">
                     {user.unread}
                   </span>
                 )}
@@ -114,12 +114,15 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
                 <Link href="/signin" className="btn-primary w-full" data-testid="nav-signin">
                   Sign in
                 </Link>
-                <Link href="/signup" className="btn w-full border border-line bg-white text-ink hover:bg-pill">
+                <Link href="/signup" className="btn w-full border border-line bg-card text-ink hover:bg-pill">
                   Create account
                 </Link>
               </div>
             )}
-            <p className="mt-3 px-1 text-[11px] leading-relaxed text-secondary">Play-money markets. TP has no cash value.</p>
+            <p className="mt-3 px-1 pb-1 text-[11px] leading-relaxed text-secondary">
+              Play-money markets. TP has no cash value.
+            </p>
+            <ThemeToggle />
           </div>
         </aside>
 
@@ -131,6 +134,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
           <div className="flex items-center gap-2">
             {user ? (
               <>
+                <ThemeToggle compact />
                 <Link href="/notifications" className="relative rounded-lg p-2 text-secondary hover:bg-pill" aria-label="Notifications">
                   <BellIcon />
                   {user.unread > 0 && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-action" />}
@@ -140,9 +144,12 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
                 </Link>
               </>
             ) : (
-              <Link href="/signin" className="btn-primary h-8 px-3 text-xs">
-                Sign in
-              </Link>
+              <>
+                <ThemeToggle compact />
+                <Link href="/signin" className="btn-primary h-8 px-3 text-xs">
+                  Sign in
+                </Link>
+              </>
             )}
           </div>
         </header>
@@ -173,7 +180,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
 
         <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-[min(100%-2rem,320px)] flex-col gap-2 lg:right-6 lg:top-6">
           {toasts.map((item) => (
-            <div key={item.id} className="pointer-events-auto rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink shadow-sheet">
+            <div key={item.id} className="pointer-events-auto rounded-xl border border-line bg-card px-3.5 py-2.5 text-sm text-ink shadow-sheet">
               {item.message}
             </div>
           ))}
@@ -186,9 +193,9 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
 function Logo() {
   return (
     <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden>
-      <rect width="32" height="32" rx="8" fill="#2A333D" />
-      <path d="M16 7v18" stroke="#F8F7F4" strokeWidth="1.7" strokeLinecap="round" />
-      <circle cx="16" cy="12.5" r="2.5" fill="#F8F7F4" />
+      <rect width="32" height="32" rx="8" fill="var(--action-deep)" />
+      <path d="M16 7v18" stroke="var(--canvas)" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="16" cy="12.5" r="2.5" fill="var(--canvas)" />
     </svg>
   );
 }
@@ -243,5 +250,32 @@ function PlusIcon() {
     <Icon>
       <path d="M12 5v14M5 12h14" strokeLinecap="round" />
     </Icon>
+  );
+}
+
+function ThemeToggle({ compact = false }: { compact?: boolean }) {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => {
+    setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  }, []);
+
+  function toggle() {
+    const next = theme === "dark" ? "light" : "dark";
+    if (next === "dark") document.documentElement.dataset.theme = "dark";
+    else delete document.documentElement.dataset.theme;
+    localStorage.setItem("tpg-theme", next);
+    setTheme(next);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      data-testid="theme-toggle"
+      className={compact ? "rounded-lg p-2 text-secondary hover:bg-pill" : "mt-2 w-full rounded-lg px-2 py-1.5 text-left text-xs text-secondary hover:bg-pill hover:text-ink"}
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {theme === "dark" ? "Light mode" : "Dark mode"}
+    </button>
   );
 }

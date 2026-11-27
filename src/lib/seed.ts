@@ -130,16 +130,16 @@ function specs(now: number): Spec[] {
     {
       slug: "agent-benchmark-90",
       type: "BINARY",
-      question: "Will a public AI agent benchmark post a verified score above 90 before 2027?",
+      question: "Will a public AI agent benchmark post a verified score above 90 before July 2028?",
       description:
-        "Resolves YES if, before 1 January 2027, a widely cited public agent benchmark (SWE-bench Verified, OSWorld, or a successor adopted by at least two frontier labs) shows a score above 90 from a named model, reproduced by a party other than the lab that trained it.\n\nVendor blog posts without a public eval harness do not count. The resolution note will link the reproduction.",
+        "Resolves YES if, before 1 July 2028, a widely cited public agent benchmark (SWE-bench Verified, OSWorld, or a successor adopted by at least two frontier labs) shows a score above 90 from a named model, reproduced by a party other than the lab that trained it.\n\nVendor blog posts without a public eval harness do not count. The resolution note will link the reproduction.",
       topic: "AI",
       creator: "usr_priya",
       ante: 240,
       probability: 0.57,
       path: [0.57, 0.63, 0.58, 0.49, 0.54, 0.61],
       createdDaysAgo: 38,
-      closeInDays: 40,
+      closeInDays: 500,
       trades: 64,
       demo: { amount: 25, outcome: "YES", daysAgo: 1 },
       comments: [
@@ -225,16 +225,16 @@ function specs(now: number): Spec[] {
     {
       slug: "eth-etf-20b",
       type: "BINARY",
-      question: "Will spot Ethereum ETFs record more than $20B of net inflows during 2026?",
+      question: "Will spot Ethereum ETFs record more than $20B of net inflows during 2027?",
       description:
-        "Resolves YES if the sum of net creations across US spot ether ETFs, from 1 January 2026 through 31 December 2026, exceeds 20 billion US dollars.\n\nThe source is the issuer flow tally compiled by Bloomberg and cross-checked against the funds' daily creation files. A single issuer's marketing number does not count.",
+        "Resolves YES if the sum of net creations across US spot ether ETFs, from 1 January 2027 through 31 December 2027, exceeds 20 billion US dollars.\n\nThe source is the issuer flow tally compiled by Bloomberg and cross-checked against the funds' daily creation files. A single issuer's marketing number does not count.",
       topic: "Crypto",
       creator: "usr_kenji",
       ante: 180,
       probability: 0.29,
       path: [0.29, 0.34, 0.26, 0.22, 0.27, 0.24],
       createdDaysAgo: 40,
-      closeInDays: 40,
+      closeInDays: 400,
       trades: 50,
       comments: [
         { user: "usr_kenji", body: "Twenty billion is a bitcoin-ETF number. Ether's share of flows has not looked like that for a full year.", daysAgo: 11 },
@@ -261,16 +261,16 @@ function specs(now: number): Spec[] {
     {
       slug: "spx-7000-2026",
       type: "BINARY",
-      question: "Will the S&P 500 close above 7,000 on the last trading day of 2026?",
+      question: "Will the S&P 500 close above 7,500 on the last trading day of 2027?",
       description:
-        "Resolves YES if the official S&P 500 index close on the final NYSE trading session of 2026 is strictly above 7,000.\n\nIntraday prints do not count. The source is the S&P Dow Jones closing value republished by the exchange.",
+        "Resolves YES if the official S&P 500 index close on the final NYSE trading session of 2027 is strictly above 7,500.\n\nIntraday prints do not count. The source is the S&P Dow Jones closing value republished by the exchange.",
       topic: "Economics",
       creator: "usr_marcus",
       ante: 300,
       probability: 0.48,
       path: [0.48, 0.55, 0.51, 0.43, 0.46, 0.5, 0.47],
       createdDaysAgo: 55,
-      closeInDays: 34,
+      closeInDays: 400,
       trades: 76,
       comments: [
         { user: "usr_elena", body: "This is mostly a multiples question from here. Earnings are not the swing factor into year end.", daysAgo: 8 },
@@ -314,47 +314,47 @@ function specs(now: number): Spec[] {
       ],
     },
     {
-      slug: "warmest-year-2026",
+      slug: "warmest-year-2027",
       type: "BINARY",
-      question: "Will 2026 be the warmest year on record in the NOAA global series?",
+      question: "Will 2027 be the warmest year on record in the NOAA global series?",
       description:
-        "Resolves YES if NOAA's annual global surface temperature anomaly for 2026, in the first full-year release, is higher than every prior year in that same series.\n\nLater revisions are ignored. Other agencies' series are ignored. The source is the NOAA National Centers for Environmental Information annual climate report.",
+        "Resolves YES if NOAA's annual global surface temperature anomaly for 2027, in the first full-year release, is higher than every prior year in that same series.\n\nLater revisions are ignored. Other agencies' series are ignored. The source is the NOAA National Centers for Environmental Information annual climate report.",
       topic: "Science",
       creator: "usr_nora",
       ante: 150,
       probability: 0.55,
       path: [0.55, 0.58, 0.51, 0.49, 0.53],
       createdDaysAgo: 20,
-      closeInDays: 70,
+      closeInDays: 450,
       trades: 32,
       comments: [
         { user: "usr_jonas", body: "A strong El Niño would settle this early. Without one it's a coin flip dressed up as a trend.", daysAgo: 6 },
       ],
     },
     {
-      slug: "world-cup-2026",
+      slug: "euro-2028",
       type: "MULTIPLE",
-      question: "Which country will win the 2026 FIFA World Cup?",
+      question: "Which country will win UEFA Euro 2028?",
       description:
-        "Resolves to the country that wins the final of the 2026 FIFA World Cup. If the tournament is cancelled or not completed by the close date, the market resolves N/A and stakes are returned.\n\nExtra time and penalties count. The source is FIFA's official match report for the final.",
+        "Resolves to the country that wins the final of UEFA Euro 2028. If the tournament is cancelled or not completed by the close date, the market resolves N/A and stakes are returned.\n\nExtra time and penalties count. The source is UEFA's official match report for the final.",
       topic: "Sports",
       creator: "usr_leo",
       ante: 360,
       answers: [
-        { key: "brazil", text: "Brazil", probability: 0.18 },
-        { key: "france", text: "France", probability: 0.16 },
-        { key: "argentina", text: "Argentina", probability: 0.15 },
-        { key: "england", text: "England", probability: 0.13 },
-        { key: "spain", text: "Spain", probability: 0.12 },
-        { key: "germany", text: "Germany", probability: 0.08 },
-        { key: "portugal", text: "Portugal", probability: 0.07 },
+        { key: "france", text: "France", probability: 0.18 },
+        { key: "england", text: "England", probability: 0.16 },
+        { key: "spain", text: "Spain", probability: 0.15 },
+        { key: "germany", text: "Germany", probability: 0.13 },
+        { key: "portugal", text: "Portugal", probability: 0.1 },
+        { key: "italy", text: "Italy", probability: 0.09 },
+        { key: "netherlands", text: "Netherlands", probability: 0.08 },
         { key: "other", text: "Another country", probability: 0.11 },
       ],
       path: [
-        [0.18, 0.16, 0.15, 0.13, 0.12, 0.08, 0.07, 0.11],
-        [0.16, 0.18, 0.14, 0.14, 0.13, 0.08, 0.07, 0.1],
-        [0.15, 0.17, 0.16, 0.12, 0.14, 0.09, 0.06, 0.11],
-        [0.17, 0.16, 0.15, 0.13, 0.13, 0.08, 0.07, 0.11],
+        [0.18, 0.16, 0.15, 0.13, 0.1, 0.09, 0.08, 0.11],
+        [0.16, 0.18, 0.14, 0.14, 0.11, 0.09, 0.08, 0.1],
+        [0.17, 0.15, 0.16, 0.13, 0.1, 0.1, 0.08, 0.11],
+        [0.19, 0.16, 0.14, 0.13, 0.1, 0.09, 0.08, 0.11],
       ],
       createdDaysAgo: 50,
       closeInDays: 230,
@@ -644,7 +644,31 @@ export async function seedDatabase() {
     });
 
     const steps = spec.trades;
+    const demoStep = Math.floor(steps * 0.42);
     for (let step = 0; step < steps; step++) {
+      if (spec.demo && step === demoStep) {
+        const demo = wallets.get("usr_demo")!;
+        const when = new Date(createdAt.getTime() + (end.getTime() - createdAt.getTime()) * 0.42);
+        try {
+          if (spec.type === "BINARY" && spec.demo.outcome) {
+            record(market, buy(market, demo, { amount: spec.demo.amount, outcome: spec.demo.outcome }), when);
+          } else if (spec.type === "MULTIPLE" && spec.demo.answer) {
+            record(market, buy(market, demo, { amount: spec.demo.amount, answerId: `ans_${spec.slug}_${spec.demo.answer}` }), when);
+          }
+          notes.push({
+            id: nid("ntf"),
+            userId: demo.id,
+            type: "TRADE",
+            title: "Trade filled",
+            body: `Bought ${spec.demo.amount.toFixed(2)} TP.`,
+            href: `/market/${spec.slug}`,
+            read: false,
+            createdAt: when,
+          });
+        } catch (error) {
+          console.warn(`Demo trade skipped on ${spec.slug}:`, error instanceof Error ? error.message : error);
+        }
+      }
       const u = steps === 1 ? 1 : step / (steps - 1);
       const when = new Date(createdAt.getTime() + (end.getTime() - createdAt.getTime()) * ((step + rand()) / steps));
       if (spec.type === "BINARY") {
@@ -702,38 +726,26 @@ export async function seedDatabase() {
       }
     }
 
-    if (spec.demo) {
-      const demo = wallets.get("usr_demo")!;
-      const when = new Date(now - spec.demo.daysAgo * DAY);
+    if (spec.demo && !spec.resolve) {
+      const favorable = spec.slug === "fed-cuts-june-2027" || spec.slug === "bitcoin-150k";
+      const when = new Date(end.getTime() - 30 * 60_000);
       try {
-        if (spec.type === "BINARY" && spec.demo.outcome) {
-          record(market, buy(market, demo, { amount: spec.demo.amount, outcome: spec.demo.outcome }), when);
-          notes.push({
-            id: nid("ntf"),
-            userId: demo.id,
-            type: "TRADE",
-            title: "Trade filled",
-            body: `Bought ${spec.demo.outcome} for ${spec.demo.amount.toFixed(2)} TP.`,
-            href: `/market/${spec.slug}`,
-            read: false,
-            createdAt: when,
-          });
-        } else if (spec.type === "MULTIPLE" && spec.demo.answer) {
-          const answerId = `ans_${spec.slug}_${spec.demo.answer}`;
-          record(market, buy(market, demo, { amount: spec.demo.amount, answerId }), when);
-          notes.push({
-            id: nid("ntf"),
-            userId: demo.id,
-            type: "TRADE",
-            title: "Trade filled",
-            body: `Bought ${spec.demo.amount.toFixed(2)} TP of a World Cup side.`,
-            href: `/market/${spec.slug}`,
-            read: false,
-            createdAt: when,
-          });
+        const wallet = wallets.get("usr_marcus")!;
+        if (spec.type === "BINARY" && spec.demo.outcome && wallet.balance > 200) {
+          const outcome = favorable ? spec.demo.outcome : spec.demo.outcome === "YES" ? "NO" : "YES";
+          for (let nudge = 0; nudge < 3; nudge++) {
+            record(market, buy(market, wallet, { amount: 55, outcome }), new Date(when.getTime() + nudge * 60_000));
+          }
+        } else if (spec.type === "MULTIPLE" && spec.demo.answer && wallet.balance > 120) {
+          const target = favorable
+            ? market.answers.find((answer) => answer.id.endsWith(`_${spec.demo?.answer}`))
+            : market.answers.find((answer) => !answer.id.endsWith(`_${spec.demo?.answer}`));
+          if (target) {
+            record(market, buy(market, wallet, { amount: 28, answerId: target.id }), when);
+          }
         }
-      } catch (error) {
-        console.warn(`Demo trade skipped on ${spec.slug}:`, error instanceof Error ? error.message : error);
+      } catch {
+        // A follow-up nudge can fail if the pool is thin. Earlier trades still move the mark.
       }
     }
 
@@ -885,7 +897,7 @@ export async function seedDatabase() {
 
   await prisma.bookmark.createMany({
     data: [
-      { userId: "usr_demo", marketId: "mkt_world-cup-2026", createdAt: new Date(now - 3 * DAY) },
+      { userId: "usr_demo", marketId: "mkt_euro-2028", createdAt: new Date(now - 3 * DAY) },
       { userId: "usr_demo", marketId: "mkt_spx-7000-2026", createdAt: new Date(now - 2 * DAY) },
     ],
   });

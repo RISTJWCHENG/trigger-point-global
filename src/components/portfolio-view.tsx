@@ -137,7 +137,7 @@ function Positions({ data }: { data: PortfolioData }) {
                         data-testid={`quick-sell-${row.slug}`}
                         disabled={pending === `${row.slug}-${row.side}`}
                         onClick={() => void sell(row)}
-                        className="btn h-8 border border-line bg-white px-3 text-xs hover:bg-pill"
+                        className="btn h-8 border border-line bg-card px-3 text-xs hover:bg-pill"
                       >
                         Sell
                       </button>

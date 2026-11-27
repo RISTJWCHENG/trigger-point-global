@@ -57,7 +57,7 @@ export function SignInForm({ next }: { next?: string }) {
           <input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="field mt-1" autoComplete="current-password" data-testid="signin-password" />
         </label>
         {error && <p className="text-sm text-no">{error}</p>}
-        <button type="submit" disabled={pending} className="btn w-full border border-line bg-white text-ink hover:bg-pill" data-testid="signin-submit">
+        <button type="submit" disabled={pending} className="btn w-full border border-line bg-card text-ink hover:bg-pill" data-testid="signin-submit">
           {pending ? "Signing in" : "Sign in"}
         </button>
       </form>

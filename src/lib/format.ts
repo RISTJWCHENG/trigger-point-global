@@ -1,7 +1,14 @@
+/** Treat sub-cent dust as zero so the UI never shows -0.00. */
+export function normalizeMoney(value: number): number {
+  if (!Number.isFinite(value) || Math.abs(value) < 0.005) return 0;
+  return value;
+}
+
 export function formatTp(value: number, mode: "exact" | "compact" = "exact"): string {
   if (!Number.isFinite(value)) return "—";
-  const sign = value < 0 ? "-" : "";
-  const abs = Math.abs(value);
+  const normalized = normalizeMoney(value);
+  const sign = normalized < 0 ? "-" : "";
+  const abs = Math.abs(normalized);
   if (mode === "compact") {
     if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
     if (abs >= 10_000) return `${sign}${(abs / 1000).toFixed(1)}k`;
@@ -14,8 +21,9 @@ export function formatTp(value: number, mode: "exact" | "compact" = "exact"): st
 
 export function formatSignedTp(value: number): string {
   if (!Number.isFinite(value)) return "—";
-  const prefix = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${prefix}${formatTp(Math.abs(value))}`;
+  const normalized = normalizeMoney(value);
+  const prefix = normalized > 0 ? "+" : normalized < 0 ? "−" : "";
+  return `${prefix}${formatTp(Math.abs(normalized))}`;
 }
 
 export function formatPercent(prob: number, digits = 0): string {

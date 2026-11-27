@@ -70,7 +70,7 @@ export function CreateForm({ balance }: { balance: number }) {
             key={id}
             type="button"
             onClick={() => setType(id)}
-            className={cn("rounded-md py-2", type === id ? "bg-white font-medium text-ink shadow-card" : "text-secondary")}
+            className={cn("rounded-md py-2", type === id ? "bg-card font-medium text-ink shadow-card" : "text-secondary")}
           >
             {label}
           </button>

@@ -23,17 +23,28 @@ export function BetPanel({
   market,
   balance,
   signedIn,
+  selectedAnswerId,
+  onSelectAnswer,
 }: {
   market: MarketDetail;
   balance: number | null;
   signedIn: boolean;
+  selectedAnswerId?: string;
+  onSelectAnswer?: (id: string) => void;
 }) {
   const router = useRouter();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [outcome, setOutcome] = useState<"YES" | "NO">("YES");
-  const [answerId, setAnswerId] = useState(
+  const [orderType, setOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [limitPct, setLimitPct] = useState(45);
+  const [internalAnswer, setInternalAnswer] = useState(
     [...market.answers].sort((a, b) => b.probability - a.probability)[0]?.id ?? "",
   );
+  const answerId = selectedAnswerId || internalAnswer;
+  function setAnswerId(id: string) {
+    setInternalAnswer(id);
+    onSelectAnswer?.(id);
+  }
   const [amount, setAmount] = useState("50");
   const [shareText, setShareText] = useState("");
   const [pending, setPending] = useState(false);
@@ -60,7 +71,7 @@ export function BetPanel({
 
   const preview = useMemo(() => {
     try {
-      if (market.resolution) return null;
+      if (market.resolution || (orderType === "LIMIT" && market.type === "BINARY" && side === "BUY")) return null;
       if (side === "BUY") {
         if (!(stake >= 1)) return null;
         if (market.type === "BINARY") {
@@ -109,7 +120,7 @@ export function BetPanel({
     } catch {
       return null;
     }
-  }, [answerId, heldBasis, heldShares, market, outcome, selling, side, stake]);
+  }, [answerId, heldBasis, heldShares, market, orderType, outcome, selling, side, stake]);
 
   const resolved = resolutionLabel(market.resolution, market.resolutionProb, market.answers, market.type);
   const payoutLabel = market.type === "BINARY" ? `Payout if ${outcome}` : "Payout if chosen";
@@ -123,7 +134,20 @@ export function BetPanel({
     }
     setPending(true);
     try {
-      if (side === "BUY") {
+      if (side === "BUY" && orderType === "LIMIT" && market.type === "BINARY") {
+        const result = await postJson<{ status: string; remaining: number; probability: number }>(`/api/markets/${market.slug}/limit`, {
+          amount: stake,
+          outcome,
+          limitProb: limitPct / 100,
+        });
+        setNote(
+          result.status === "FILLED"
+            ? `Limit filled · market now ${formatPercent(result.probability, 1)}`
+            : result.remaining < stake
+              ? `Partly filled · ${formatTp(result.remaining)} TP still resting at ${limitPct}%`
+              : `Limit resting at ${limitPct}%`,
+        );
+      } else if (side === "BUY") {
         const result = await postJson<{ shares: number; probAfter: number; outcome: string; balance: number }>(
           `/api/markets/${market.slug}/bet`,
           { amount: stake, outcome: market.type === "BINARY" ? outcome : undefined, answerId: market.type === "MULTIPLE" ? answerId : undefined },
@@ -180,7 +204,7 @@ export function BetPanel({
                 if (holding && holding.sharesNo <= 0.01 && holding.sharesYes > 0.01) setOutcome("YES");
               }
             }}
-            className={cn("rounded-md py-1.5", side === item ? "bg-white font-medium text-ink shadow-card" : "text-secondary")}
+            className={cn("rounded-md py-1.5", side === item ? "bg-card font-medium text-ink shadow-card" : "text-secondary")}
           >
             {item === "BUY" ? "Buy" : "Sell"}
           </button>
@@ -207,28 +231,41 @@ export function BetPanel({
           </button>
         </div>
       ) : (
-        <div className="mt-3 max-h-80 space-y-1 overflow-auto pr-1">
-          {market.answers.map((answer) => {
-            const selected = answer.id === answerId;
-            const owned = market.holdings.find((holding) => holding.answerId === answer.id)?.shares ?? 0;
-            if (side === "SELL" && owned <= 0.01) return null;
-            return (
-              <button
-                key={answer.id}
-                type="button"
-                data-testid={`answer-${answer.id}`}
-                onClick={() => setAnswerId(answer.id)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm",
-                  selected ? "border-action bg-white" : "border-transparent bg-pill/70 hover:bg-pill",
-                )}
-              >
-                <span className="min-w-0 flex-1 truncate">{answer.text}</span>
-                <span className="num text-ink">{formatPercent(answer.probability)}</span>
-              </button>
-            );
-          })}
+        <SelectedOutcome market={market} answerId={answerId} />
+      )}
+
+      {market.type === "BINARY" && side === "BUY" && (
+        <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-pill p-1 text-xs">
+          {(["MARKET", "LIMIT"] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              data-testid={item === "MARKET" ? "order-market" : "order-limit"}
+              onClick={() => setOrderType(item)}
+              className={cn("rounded-md py-1.5", orderType === item ? "bg-card font-medium text-ink shadow-card" : "text-secondary")}
+            >
+              {item === "MARKET" ? "Market" : "Limit"}
+            </button>
+          ))}
         </div>
+      )}
+
+      {market.type === "BINARY" && side === "BUY" && orderType === "LIMIT" && (
+        <label className="mt-3 block text-xs text-secondary">
+          Limit · <span className="num text-ink">{limitPct}%</span>
+          <input
+            data-testid="limit-prob"
+            type="range"
+            min={1}
+            max={99}
+            value={limitPct}
+            onChange={(event) => setLimitPct(Number(event.target.value))}
+            className="mt-1 w-full"
+          />
+          <span className="mt-1 block text-[11px] text-muted">
+            {outcome === "YES" ? "Buys YES while the price is below this." : "Buys NO while that price is below this."}
+          </span>
+        </label>
       )}
 
       {side === "BUY" ? (
@@ -254,7 +291,7 @@ export function BetPanel({
                 onClick={() => setAmount(String(value))}
                 className={cn(
                   "rounded-full px-2.5 py-1 text-xs",
-                  Number(amount) === value ? "bg-actionDeep text-white" : "bg-pill text-secondary hover:text-ink",
+                  Number(amount) === value ? "bg-actionDeep text-[var(--action-ink)]" : "bg-pill text-secondary hover:text-ink",
                 )}
               >
                 {value}
@@ -327,11 +364,21 @@ export function BetPanel({
         <button
           type="button"
           data-testid="bet-submit"
-          disabled={pending || !preview || (side === "BUY" && balance !== null && stake > balance + 1e-6)}
+          disabled={
+            pending ||
+            (side === "BUY" && balance !== null && stake > balance + 1e-6) ||
+            (orderType === "LIMIT" && market.type === "BINARY" && side === "BUY" ? !(stake >= 1) : !preview)
+          }
           onClick={() => void submit()}
           className="btn-primary mt-4 h-11 w-full"
         >
-          {pending ? "Submitting" : side === "BUY" ? `Buy ${market.type === "BINARY" ? outcome : "shares"}` : "Sell shares"}
+          {pending
+            ? "Submitting"
+            : side === "SELL"
+              ? "Sell shares"
+              : orderType === "LIMIT" && market.type === "BINARY"
+                ? "Place limit"
+                : `Buy ${market.type === "BINARY" ? outcome : "shares"}`}
         </button>
       ) : (
         <Link href={`/signin?next=/market/${market.slug}`} className="btn-primary mt-4 h-11 w-full">
@@ -343,7 +390,56 @@ export function BetPanel({
           Balance <span className="num text-secondary">{formatTp(balance)} TP</span>
         </p>
       )}
+      <OpenOrders market={market} />
     </section>
+  );
+}
+
+function SelectedOutcome({ market, answerId }: { market: MarketDetail; answerId: string }) {
+  const answer = market.answers.find((item) => item.id === answerId) ?? market.answers[0];
+  if (!answer) return null;
+  return (
+    <div className="mt-3 rounded-lg bg-pill px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-muted">Selected outcome</div>
+      <div className="mt-1 flex items-center justify-between gap-3 text-sm">
+        <span className="font-medium">{answer.text}</span>
+        <span className="num">{formatPercent(answer.probability, 1)}</span>
+      </div>
+    </div>
+  );
+}
+
+function OpenOrders({ market }: { market: MarketDetail }) {
+  const router = useRouter();
+  const mine = market.limitOrders.filter((order) => order.mine);
+  if (!mine.length && market.limitOrders.length === 0) return null;
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <h3 className="text-xs font-medium uppercase tracking-wide text-muted">Open limits</h3>
+      <ul className="mt-2 space-y-2">
+        {market.limitOrders.map((order) => (
+          <li key={order.id} className="flex items-center justify-between gap-2 text-xs">
+            <span className="num text-secondary">
+              {order.outcome} ≤ {formatPercent(order.limitProb)} · {formatTp(order.remaining)} TP
+              {order.mine ? "" : ` · ${order.user.name}`}
+            </span>
+            {order.mine && (
+              <button
+                type="button"
+                data-testid={`cancel-order-${order.id}`}
+                className="text-ink hover:underline"
+                onClick={async () => {
+                  await postJson(`/api/orders/${order.id}/cancel`);
+                  router.refresh();
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

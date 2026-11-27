@@ -4,6 +4,7 @@ import { prisma } from "./db";
 import { createMarket, placeBet, sellShares, settleMarket } from "./market-service";
 
 async function reset() {
+  await prisma.limitOrder.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.bookmark.deleteMany();
   await prisma.pnlEntry.deleteMany();

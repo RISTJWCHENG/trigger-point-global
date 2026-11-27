@@ -36,10 +36,10 @@ export function FeedHeader({ query, signedIn }: { query: FeedQuery; signedIn: bo
         </div>
         {signedIn && (
           <div className="hidden rounded-lg bg-pill p-0.5 text-sm sm:flex">
-            <Link href={href({ fy: "0" })} className={cn("rounded-md px-2.5 py-1", query.fy !== "1" ? "bg-white text-ink shadow-card" : "text-secondary")}>
+            <Link href={href({ fy: "0" })} className={cn("rounded-md px-2.5 py-1", query.fy !== "1" ? "bg-card text-ink shadow-card" : "text-secondary")}>
               All
             </Link>
-            <Link href={href({ fy: "1" })} className={cn("rounded-md px-2.5 py-1", query.fy === "1" ? "bg-white text-ink shadow-card" : "text-secondary")}>
+            <Link href={href({ fy: "1" })} className={cn("rounded-md px-2.5 py-1", query.fy === "1" ? "bg-card text-ink shadow-card" : "text-secondary")}>
               For you
             </Link>
           </div>
@@ -77,7 +77,7 @@ export function FeedHeader({ query, signedIn }: { query: FeedQuery; signedIn: bo
               data-testid={`topic-${topic.id}`}
               className={cn(
                 "shrink-0 rounded-full px-3 py-1.5 text-sm transition",
-                on ? "bg-actionDeep text-white" : "bg-pill text-secondary hover:text-ink",
+                on ? "bg-actionDeep text-[var(--action-ink)]" : "bg-pill text-secondary hover:text-ink",
               )}
             >
               {topic.label}
@@ -126,7 +126,7 @@ function Select({
         value={value}
         data-testid={testId}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 rounded-lg border border-line bg-white px-2.5 text-sm text-ink outline-none focus:border-action"
+        className="h-9 rounded-lg border border-line bg-card px-2.5 text-sm text-ink outline-none focus:border-action"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
