@@ -95,8 +95,10 @@ function DailyBonus({ signedIn, available }: { signedIn: boolean; available: boo
   }
 
   return (
-    <section className="surface p-4">
-      <h2 className="text-sm font-medium text-ink">Daily bonus</h2>
+    <section className="surface feature p-4" data-testid="daily-bonus-card">
+      <h2 className="kicker text-sm font-medium text-ink">
+        <span className="index">01 / </span>Daily bonus
+      </h2>
       <p className="mt-1 text-xs leading-relaxed text-secondary">50 TP, once a day. Play money only.</p>
       <button
         type="button"

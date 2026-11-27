@@ -62,7 +62,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
             <Logo />
             <span>
               <span className="block font-display text-[18px] leading-none tracking-tight text-ink">TriggerPoint</span>
-              <span className="mt-1 block text-[10px] font-medium uppercase tracking-[0.18em] text-muted">Global</span>
+              <span className="brand-kicker mt-1 block text-[10px] font-medium uppercase tracking-[0.18em] text-muted">Global</span>
             </span>
           </Link>
           <nav className="mt-4 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3">
@@ -125,11 +125,12 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
             <p className="mt-3 px-1 pb-1 text-[11px] leading-relaxed text-secondary">
               Play-money markets. TP has no cash value.
             </p>
-            <ThemeToggle />
+            <ThemeSwitch />
           </div>
         </aside>
 
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-canvas px-4 py-3 lg:hidden">
+        <header className="sticky top-0 z-30 border-b border-line bg-canvas px-4 py-3 lg:hidden">
+          <div className="flex items-center justify-between gap-2">
           <Link href="/?fy=0" className="flex items-center gap-2">
             <Logo />
             <span className="font-display text-[17px] leading-none tracking-tight">TriggerPoint</span>
@@ -137,7 +138,6 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
           <div className="flex items-center gap-2">
             {user ? (
               <>
-                <ThemeToggle compact />
                 <Link href="/notifications" className="relative rounded-lg p-2 text-secondary hover:bg-pill" aria-label="Notifications">
                   <BellIcon />
                   {user.unread > 0 && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-action" />}
@@ -148,13 +148,14 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
               </>
             ) : (
               <>
-                <ThemeToggle compact />
                 <Link href="/signin" className="btn-primary h-8 px-3 text-xs">
                   Sign in
                 </Link>
               </>
             )}
           </div>
+          </div>
+          <ThemeSwitch />
         </header>
 
         <main className="pb-20 lg:pb-10 lg:pl-[248px]">{children}</main>
@@ -256,29 +257,47 @@ function PlusIcon() {
   );
 }
 
-function ThemeToggle({ compact = false }: { compact?: boolean }) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+const THEMES = [
+  { id: "atelier", label: "Atelier" },
+  { id: "stone", label: "Stone" },
+  { id: "charcoal", label: "Charcoal" },
+] as const;
+
+type ThemeId = (typeof THEMES)[number]["id"];
+
+function applyTheme(id: ThemeId) {
+  document.documentElement.dataset.theme = id;
+  localStorage.setItem("tpg-theme", id);
+}
+
+function ThemeSwitch() {
+  const [theme, setTheme] = useState<ThemeId>("atelier");
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    const current = document.documentElement.dataset.theme;
+    if (current === "stone" || current === "charcoal" || current === "atelier") setTheme(current);
   }, []);
 
-  function toggle() {
-    const next = theme === "dark" ? "light" : "dark";
-    if (next === "dark") document.documentElement.dataset.theme = "dark";
-    else delete document.documentElement.dataset.theme;
-    localStorage.setItem("tpg-theme", next);
-    setTheme(next);
-  }
-
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      data-testid="theme-toggle"
-      className={compact ? "rounded-lg p-2 text-secondary hover:bg-pill" : "mt-2 w-full rounded-lg px-2 py-1.5 text-left text-xs text-secondary hover:bg-pill hover:text-ink"}
-      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-    >
-      {theme === "dark" ? "Light mode" : "Dark mode"}
-    </button>
+    <div role="radiogroup" aria-label="Theme" data-testid="theme-switcher" className="mt-2 grid grid-cols-3 gap-0.5 rounded-lg bg-pill p-0.5">
+      {THEMES.map((item) => {
+        const on = theme === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            data-testid={`theme-${item.id}`}
+            onClick={() => {
+              applyTheme(item.id);
+              setTheme(item.id);
+            }}
+            className={cn("rounded-md px-1 py-1 text-[11px] font-medium", on ? "bg-card text-ink shadow-card" : "text-secondary hover:text-ink")}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

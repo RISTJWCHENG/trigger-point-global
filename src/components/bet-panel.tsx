@@ -180,7 +180,7 @@ export function BetPanel({
 
   if (blocked) {
     return (
-      <section className="surface p-4" data-testid="bet-blocked">
+      <section className="surface feature p-4" data-testid="bet-blocked">
         <h2 className="text-sm font-medium text-ink">Betting closed for you</h2>
         <p className="mt-2 text-sm leading-relaxed text-secondary">The creator has blocked themselves from betting in this market.</p>
       </section>
@@ -189,7 +189,7 @@ export function BetPanel({
 
   if (resolved) {
     return (
-      <section className="surface p-4">
+      <section className="surface feature p-4">
         <h2 className="text-sm font-medium text-ink">{resolved}</h2>
         <p className="mt-2 text-sm leading-relaxed text-secondary">
           Trading is closed. Winning shares paid 1 TP each, a percentage resolution paid the stated fraction, and a cancellation returned net stakes.
@@ -200,7 +200,10 @@ export function BetPanel({
   }
 
   return (
-    <section className="surface p-4" data-testid="bet-panel">
+    <section className="surface feature p-4" data-testid="bet-panel">
+      <p className="kicker mb-3 text-sm font-medium">
+        <span className="index">02 / </span>Trade
+      </p>
       <div className="grid grid-cols-2 gap-1 rounded-lg bg-pill p-1 text-sm">
         {(["BUY", "SELL"] as const).map((item) => (
           <button

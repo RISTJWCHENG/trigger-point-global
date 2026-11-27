@@ -49,7 +49,7 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
         <div className="mt-3 flex items-start justify-between gap-4">
           <h1 className="text-[26px] font-medium leading-[1.2] tracking-tight text-ink">{market.question}</h1>
           <div className="shrink-0 text-right">
-            <div className="num text-4xl font-medium leading-none tracking-tight" data-testid="market-probability">
+            <div className="figure num text-4xl font-medium leading-none tracking-tight" data-testid="market-probability">
               {formatPercent(headline, headline > 0.995 || headline < 0.015 ? 0 : 1)}
             </div>
             <div className="mt-1 max-w-[120px] truncate text-[11px] uppercase tracking-wide text-muted">{headlineLabel}</div>

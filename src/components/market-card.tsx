@@ -81,7 +81,7 @@ export function MarketCard({ market, signedIn }: { market: Card; signedIn: boole
           </p>
         </div>
         <Link href={`/market/${market.slug}`} className="flex shrink-0 flex-col items-end pt-5 text-right">
-          <div className="num text-[28px] font-medium leading-none tracking-tight text-ink">{formatPercent(headline)}</div>
+          <div className="figure num text-[28px] font-medium leading-none tracking-tight">{formatPercent(headline)}</div>
           <ChangePill change={market.change24h} />
           <Sparkline values={market.spark} />
           <div className="mt-1 max-w-[88px] truncate text-[11px] uppercase tracking-wide text-muted">{headlineLabel}</div>

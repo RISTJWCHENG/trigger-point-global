@@ -47,7 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(localStorage.getItem("tpg-theme")==="dark")document.documentElement.dataset.theme="dark"}catch(e){}`,
+            __html: `try{var t=localStorage.getItem("tpg-theme");if(t==="dark")t="charcoal";if(t==="light")t="stone";if(t!=="stone"&&t!=="charcoal")t="atelier";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="atelier"}`,
           }}
         />
       </head>

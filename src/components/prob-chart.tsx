@@ -100,7 +100,7 @@ export function ProbChart({
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 className="text-sm font-medium text-ink">Probability</h2>
+          <h2 className="kicker text-sm font-medium text-ink">Probability</h2>
           {showGraphToggle && (
             <label className="flex items-center gap-1.5 text-xs text-secondary">
               <input
