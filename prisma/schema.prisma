@@ -29,6 +29,8 @@ model User {
   bookmarks     Bookmark[]
   pnlEntries    PnlEntry[]
   limitOrders   LimitOrder[]
+  pollVotes     PollVote[]
+  worthPoints   WorthPoint[]
 }
 
 model Market {
@@ -63,6 +65,7 @@ model Market {
   bookmarks   Bookmark[]
   pnlEntries  PnlEntry[]
   limitOrders LimitOrder[]
+  pollVotes   PollVote[]
 
   @@index([topic, createdAt])
   @@index([resolvedAt])
@@ -99,6 +102,29 @@ model Position {
   @@unique([userId, marketId, answerId])
   @@index([marketId])
   @@index([userId])
+}
+
+model PollVote {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  answerId  String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, marketId])
+  @@index([marketId])
+}
+
+model WorthPoint {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  worth     Float
+  createdAt DateTime
+
+  @@index([userId, createdAt])
 }
 
 model LimitOrder {

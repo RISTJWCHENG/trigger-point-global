@@ -32,6 +32,8 @@ export function PortfolioView({ data }: { data: PortfolioData }) {
       </div>
       {data.user.bio && <p className="mt-3 max-w-xl text-sm text-secondary">{data.user.bio}</p>}
 
+      {data.worth.length > 1 && <WorthChart points={data.worth} />}
+
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {data.isOwn && <Stat label="Net worth" value={`${formatTp(data.netWorth)} TP`} />}
         {data.isOwn && <Stat label="Cash" value={`${formatTp(data.cash)} TP`} testId="portfolio-cash" />}
@@ -60,6 +62,37 @@ export function PortfolioView({ data }: { data: PortfolioData }) {
         {tab === "Saved" && <CardList markets={data.saved} empty="Save a market from its page to watch it here." signedIn />}
       </div>
     </div>
+  );
+}
+
+function WorthChart({ points }: { points: { t: number; worth: number }[] }) {
+  const width = 640;
+  const height = 180;
+  const pad = { l: 44, r: 12, t: 16, b: 22 };
+  const min = Math.min(...points.map((point) => point.worth));
+  const max = Math.max(...points.map((point) => point.worth));
+  const span = Math.max(1, max - min);
+  const t0 = points[0].t;
+  const t1 = points[points.length - 1].t || t0 + 1;
+  const xAt = (t: number) => pad.l + ((t - t0) / (t1 - t0 || 1)) * (width - pad.l - pad.r);
+  const yAt = (worth: number) => pad.t + (1 - (worth - min) / span) * (height - pad.t - pad.b);
+  const d = points.map((point, index) => `${index ? "L" : "M"}${xAt(point.t).toFixed(1)},${yAt(point.worth).toFixed(1)}`).join(" ");
+  return (
+    <section className="surface mt-5 p-4" data-testid="worth-chart">
+      <h2 className="text-sm font-medium text-ink">Net worth</h2>
+      <p className="mt-0.5 text-xs text-muted">Cash after each fill. The latest point includes open positions at liquidation value.</p>
+      <svg viewBox={`0 0 ${width} ${height}`} className="mt-2 h-[180px] w-full" role="img" aria-label="Net worth history">
+        <line x1={pad.l} x2={width - pad.r} y1={yAt(max)} y2={yAt(max)} stroke="var(--line)" />
+        <line x1={pad.l} x2={width - pad.r} y1={yAt(min)} y2={yAt(min)} stroke="var(--line)" />
+        <text x={pad.l - 8} y={yAt(max) + 4} textAnchor="end" fill="var(--muted)" fontSize="11">
+          {Math.round(max)}
+        </text>
+        <text x={pad.l - 8} y={yAt(min) + 4} textAnchor="end" fill="var(--muted)" fontSize="11">
+          {Math.round(min)}
+        </text>
+        <path d={d} fill="none" stroke="var(--action)" strokeWidth="1.8" />
+      </svg>
+    </section>
   );
 }
 

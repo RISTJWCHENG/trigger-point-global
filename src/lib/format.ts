@@ -87,7 +87,7 @@ export function resolutionLabel(
   resolution: string | null,
   resolutionProb: number | null,
   answers: { id: string; text: string }[],
-  type: "BINARY" | "MULTIPLE",
+  type: "BINARY" | "MULTIPLE" | "POLL",
 ): string | null {
   if (!resolution) return null;
   if (resolution === "YES") return "Resolved YES";

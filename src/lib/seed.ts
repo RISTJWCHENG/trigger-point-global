@@ -35,6 +35,7 @@ type Spec = {
   ante: number;
   createdDaysAgo: number;
   closeInDays: number;
+  closeOn?: string;
   trades: number;
   comments: { user: string; body: string; replyTo?: number; daysAgo: number }[];
   demo?: { amount: number; outcome?: "YES" | "NO"; answer?: string; daysAgo: number };
@@ -48,6 +49,24 @@ type Spec = {
   );
 
 const DAY = 86_400_000;
+
+const CLOSE_ON: Record<string, string> = {
+  "fed-cuts-june-2027": "2027-07-01T16:00:00.000Z",
+  "bitcoin-150k": "2027-06-30T23:00:00.000Z",
+  "agent-benchmark-90": "2028-06-30T23:00:00.000Z",
+  "us-china-tariff-pause": "2027-04-01T16:00:00.000Z",
+  "foldable-iphone": "2027-12-31T23:00:00.000Z",
+  "starship-crew-2028": "2027-12-31T23:00:00.000Z",
+  "cpi-below-25-h1": "2027-07-15T16:00:00.000Z",
+  "eth-etf-20b": "2027-12-31T23:00:00.000Z",
+  "openai-hardware": "2027-12-31T23:00:00.000Z",
+  "spx-7000-2026": "2027-12-31T23:00:00.000Z",
+  "quantum-advantage-paper": "2027-12-31T23:00:00.000Z",
+  "warmest-year-2027": "2028-01-31T16:00:00.000Z",
+  "euro-2028": "2028-07-15T18:00:00.000Z",
+  "nba-champion-2027": "2027-06-30T16:00:00.000Z",
+  "model-leader-2027": "2027-12-31T23:00:00.000Z",
+};
 
 function mulberry32(seed: number) {
   let state = seed;
@@ -563,6 +582,7 @@ export async function seedDatabase() {
   }
 
   const trades: TradeRow[] = [];
+  const worth: { id: string; userId: string; worth: number; createdAt: Date }[] = [];
   const points: PointRow[] = [];
   const pnls: PnlRow[] = [];
   const notes: NoteRow[] = [];
@@ -612,6 +632,8 @@ export async function seedDatabase() {
     if (fill.side === "SELL" && Math.abs(fill.realizedPnl) > 1e-6) {
       pnls.push({ id: nid("pnl"), userId: fill.userId, marketId: market.id, amount: fill.realizedPnl, createdAt });
     }
+    const wallet = wallets.get(fill.userId);
+    if (wallet) worth.push({ id: nid("wth"), userId: fill.userId, worth: wallet.balance, createdAt });
   }
 
   for (const spec of specs(now)) {
@@ -620,7 +642,12 @@ export async function seedDatabase() {
     if (creator.balance < spec.ante) throw new Error(`${creator.username} cannot fund ${spec.slug}`);
     creator.balance -= spec.ante;
     const createdAt = new Date(now - spec.createdDaysAgo * DAY);
-    const closeAt = new Date(now + spec.closeInDays * DAY);
+    worth.push({ id: nid("wth"), userId: creator.id, worth: creator.balance, createdAt });
+    const closeAt = spec.closeOn
+      ? new Date(spec.closeOn)
+      : CLOSE_ON[spec.slug]
+        ? new Date(CLOSE_ON[spec.slug])
+        : new Date(now + spec.closeInDays * DAY);
     const end = spec.resolve ? new Date(now - spec.resolve.daysAgo * DAY - 2 * DAY) : new Date(now - 6 * 3_600_000);
     const market =
       spec.type === "BINARY"
@@ -859,6 +886,68 @@ export async function seedDatabase() {
   );
   if (answerRows.length) await prisma.answer.createMany({ data: answerRows });
 
+  await prisma.market.createMany({
+    data: [
+      {
+        id: "mkt_poll-desk",
+        slug: "poll-desk-setup",
+        question: "Which setup do you actually use for a full day of work?",
+        description: "A free poll. One vote per person, and you can change it until the poll closes. Nothing here moves TP.",
+        type: "POLL",
+        topic: "Tech",
+        closeAt: new Date("2027-03-01T16:00:00.000Z"),
+        createdAt: new Date(now - 12 * DAY),
+        probability: 0,
+        pot: 0,
+        ante: 0,
+        volume: 0,
+        traderCount: 0,
+        creatorId: "usr_priya",
+      },
+      {
+        id: "mkt_poll-news",
+        slug: "poll-news-habit",
+        question: "Where do you first hear that a market has moved?",
+        description: "A free poll. Pick one source. You can switch your vote later. No TP is staked.",
+        type: "POLL",
+        topic: "Science",
+        closeAt: new Date("2027-06-01T16:00:00.000Z"),
+        createdAt: new Date(now - 6 * DAY),
+        probability: 0,
+        pot: 0,
+        ante: 0,
+        volume: 0,
+        traderCount: 0,
+        creatorId: "usr_elena",
+      },
+    ],
+  });
+  await prisma.answer.createMany({
+    data: [
+      { id: "ans_desk_laptop", marketId: "mkt_poll-desk", text: "Laptop only", sortIndex: 0, pool: 0, probability: 0 },
+      { id: "ans_desk_one", marketId: "mkt_poll-desk", text: "Desktop and one monitor", sortIndex: 1, pool: 0, probability: 0 },
+      { id: "ans_desk_dock", marketId: "mkt_poll-desk", text: "Laptop docked to two monitors", sortIndex: 2, pool: 0, probability: 0 },
+      { id: "ans_desk_else", marketId: "mkt_poll-desk", text: "Something else", sortIndex: 3, pool: 0, probability: 0 },
+      { id: "ans_news_feed", marketId: "mkt_poll-news", text: "The feed itself", sortIndex: 0, pool: 0, probability: 0 },
+      { id: "ans_news_chat", marketId: "mkt_poll-news", text: "A group chat", sortIndex: 1, pool: 0, probability: 0 },
+      { id: "ans_news_letter", marketId: "mkt_poll-news", text: "A newsletter", sortIndex: 2, pool: 0, probability: 0 },
+      { id: "ans_news_alert", marketId: "mkt_poll-news", text: "A price alert", sortIndex: 3, pool: 0, probability: 0 },
+    ],
+  });
+  await prisma.pollVote.createMany({
+    data: [
+      { id: "vote_desk_demo", userId: "usr_demo", marketId: "mkt_poll-desk", answerId: "ans_desk_dock", createdAt: new Date(now - 2 * DAY) },
+      { id: "vote_desk_marcus", userId: "usr_marcus", marketId: "mkt_poll-desk", answerId: "ans_desk_one", createdAt: new Date(now - 4 * DAY) },
+      { id: "vote_desk_elena", userId: "usr_elena", marketId: "mkt_poll-desk", answerId: "ans_desk_dock", createdAt: new Date(now - 3 * DAY) },
+      { id: "vote_desk_priya", userId: "usr_priya", marketId: "mkt_poll-desk", answerId: "ans_desk_laptop", createdAt: new Date(now - 8 * DAY) },
+      { id: "vote_desk_jonas", userId: "usr_jonas", marketId: "mkt_poll-desk", answerId: "ans_desk_dock", createdAt: new Date(now - 1 * DAY) },
+      { id: "vote_news_demo", userId: "usr_demo", marketId: "mkt_poll-news", answerId: "ans_news_chat", createdAt: new Date(now - 1 * DAY) },
+      { id: "vote_news_nora", userId: "usr_nora", marketId: "mkt_poll-news", answerId: "ans_news_letter", createdAt: new Date(now - 2 * DAY) },
+      { id: "vote_news_amira", userId: "usr_amira", marketId: "mkt_poll-news", answerId: "ans_news_feed", createdAt: new Date(now - 3 * DAY) },
+      { id: "vote_news_leo", userId: "usr_leo", marketId: "mkt_poll-news", answerId: "ans_news_alert", createdAt: new Date(now - 2 * DAY) },
+    ],
+  });
+
   const positionRows = persisted.flatMap(({ market }) =>
     market.positions.map((position) => ({
       id: nid("pos"),
@@ -870,6 +959,7 @@ export async function seedDatabase() {
   if (trades.length) await prisma.trade.createMany({ data: trades });
   if (points.length) await prisma.probPoint.createMany({ data: points });
   if (pnls.length) await prisma.pnlEntry.createMany({ data: pnls });
+  if (worth.length) await prisma.worthPoint.createMany({ data: worth });
 
   const commentRows: {
     id: string;
@@ -912,4 +1002,52 @@ export async function seedDatabase() {
   if (Math.abs(wealth - granted) > 1) {
     throw new Error(`Seed leaked money: wealth ${wealth} granted ${granted}`);
   }
+
+  await prisma.user.update({ where: { id: "usr_elena" }, data: { balance: { decrement: 40 } } });
+  await prisma.user.update({ where: { id: "usr_marcus" }, data: { balance: { decrement: 55 } } });
+  await prisma.user.update({ where: { id: "usr_jonas" }, data: { balance: { decrement: 30 } } });
+  await prisma.limitOrder.createMany({
+    data: [
+      {
+        id: "ord_fed_yes_48",
+        userId: "usr_elena",
+        marketId: "mkt_fed-cuts-june-2027",
+        outcome: "YES",
+        limitProb: 0.48,
+        amount: 40,
+        remaining: 40,
+        status: "OPEN",
+      },
+      {
+        id: "ord_fed_yes_41",
+        userId: "usr_marcus",
+        marketId: "mkt_fed-cuts-june-2027",
+        outcome: "YES",
+        limitProb: 0.41,
+        amount: 25,
+        remaining: 25,
+        status: "OPEN",
+      },
+      {
+        id: "ord_fed_yes_41b",
+        userId: "usr_marcus",
+        marketId: "mkt_fed-cuts-june-2027",
+        outcome: "YES",
+        limitProb: 0.41,
+        amount: 30,
+        remaining: 30,
+        status: "OPEN",
+      },
+      {
+        id: "ord_fed_no_46",
+        userId: "usr_jonas",
+        marketId: "mkt_fed-cuts-june-2027",
+        outcome: "NO",
+        limitProb: 0.28,
+        amount: 30,
+        remaining: 30,
+        status: "OPEN",
+      },
+    ],
+  });
 }

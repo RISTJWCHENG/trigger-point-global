@@ -29,26 +29,26 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #141311;
-  --card: #1c1b19;
-  --warm: #201f1c;
-  --pill: #2a2825;
-  --line: #3c3934;
-  --ink: #f3f0e8;
-  --secondary: #b7b1a6;
-  --muted: #8c867c;
-  --yes: #8fb5a1;
-  --yes-tint: #24302b;
-  --no: #c99999;
-  --no-tint: #332828;
-  --action: #9aabb8;
-  --action-deep: #d5dde6;
-  --action-ink: #1a1916;
-  --action-hover: #e4eaf0;
+  --canvas: #141618;
+  --card: #1b1e21;
+  --warm: #1b1e21;
+  --pill: #24282c;
+  --line: #2e3338;
+  --ink: #f2f1ed;
+  --secondary: #a6abb2;
+  --muted: #8b9198;
+  --yes: #9dc7b2;
+  --yes-tint: #1c2b26;
+  --no: #d7a3a3;
+  --no-tint: #2c2022;
+  --action: #b7c3cf;
+  --action-deep: #3a4553;
+  --action-ink: #f2f1ed;
+  --action-hover: #4a5666;
   --yes-line: #345246;
   --no-line: #4a3535;
-  --yes-hover: #2c3b35;
-  --no-hover: #3d2e2e;
+  --yes-hover: #24352e;
+  --no-hover: #3a292b;
   --selection: #3a424c;
 }
 
@@ -139,4 +139,67 @@ input[type="range"] {
   .surface {
     @apply rounded-2xl border border-line bg-card shadow-card;
   }
+
+  .scrim {
+    background: color-mix(in srgb, var(--ink) 32%, transparent);
+  }
+}
+
+/* Dark surfaces are set explicitly so a light utility can never win on charcoal. */
+[data-theme="dark"] body,
+[data-theme="dark"] .bg-canvas {
+  background-color: #141618;
+  color: #f2f1ed;
+}
+
+[data-theme="dark"] .surface,
+[data-theme="dark"] .bg-card,
+[data-theme="dark"] .field,
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background-color: #1b1e21;
+  color: #f2f1ed;
+  border-color: #2e3338;
+}
+
+[data-theme="dark"] .bg-pill,
+[data-theme="dark"] option {
+  background-color: #24282c;
+  color: #f2f1ed;
+}
+
+[data-theme="dark"] .text-ink {
+  color: #f2f1ed;
+}
+
+[data-theme="dark"] .text-secondary {
+  color: #a6abb2;
+}
+
+[data-theme="dark"] .text-muted,
+[data-theme="dark"] .placeholder\:text-muted::placeholder {
+  color: #8b9198;
+}
+
+[data-theme="dark"] .btn-yes {
+  background-color: #1c2b26;
+  color: #9dc7b2;
+  border-color: #345246;
+}
+
+[data-theme="dark"] .btn-no {
+  background-color: #2c2022;
+  color: #d7a3a3;
+  border-color: #4a3535;
+}
+
+[data-theme="dark"] .bg-actionDeep,
+[data-theme="dark"] .btn-primary {
+  background-color: #3a4553;
+  color: #f2f1ed;
+}
+
+[data-theme="dark"] .btn-primary:hover {
+  background-color: #4a5666;
 }

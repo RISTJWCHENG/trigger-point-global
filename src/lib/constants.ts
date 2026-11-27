@@ -24,6 +24,7 @@ export const TYPE_FILTERS = [
   { id: "all", label: "All types" },
   { id: "binary", label: "Binary" },
   { id: "multiple", label: "Multiple Choice" },
+  { id: "poll", label: "Polls" },
 ] as const;
 
 export const QUICK_AMOUNTS = [10, 25, 50, 100, 250] as const;

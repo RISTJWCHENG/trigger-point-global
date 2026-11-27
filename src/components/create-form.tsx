@@ -13,7 +13,7 @@ function localInput(date: Date) {
 
 export function CreateForm({ balance }: { balance: number }) {
   const router = useRouter();
-  const [type, setType] = useState<"BINARY" | "MULTIPLE">("BINARY");
+  const [type, setType] = useState<"BINARY" | "MULTIPLE" | "POLL">("BINARY");
   const [question, setQuestion] = useState("");
   const [description, setDescription] = useState("");
   const [topic, setTopic] = useState("economics");
@@ -39,7 +39,7 @@ export function CreateForm({ balance }: { balance: number }) {
         type,
         topic,
         closeAt: new Date(closeAt).toISOString(),
-        ante: Number(ante),
+        ante: type === "POLL" ? 0 : Number(ante),
       };
       if (type === "BINARY") payload.probability = probability / 100;
       else {
@@ -59,11 +59,12 @@ export function CreateForm({ balance }: { balance: number }) {
 
   return (
     <form onSubmit={submit} className="surface p-5 sm:p-6">
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-pill p-1 text-sm">
+      <div className="grid grid-cols-3 gap-1 rounded-lg bg-pill p-1 text-sm">
         {(
           [
             ["BINARY", "Binary"],
-            ["MULTIPLE", "Multiple choice"],
+            ["MULTIPLE", "Choice"],
+            ["POLL", "Poll"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -123,7 +124,9 @@ export function CreateForm({ balance }: { balance: number }) {
         </label>
       </div>
 
-      {type === "BINARY" ? (
+      {type === "POLL" ? (
+        <p className="mt-4 text-sm text-secondary">Polls are free. People can cast one vote and change it until the close.</p>
+      ) : type === "BINARY" ? (
         <label className="mt-4 block text-sm text-secondary">
           Opening probability · <span className="num text-ink">{probability}%</span>
           <input
@@ -185,14 +188,17 @@ export function CreateForm({ balance }: { balance: number }) {
               </div>
             ))}
           </div>
+          {type === "MULTIPLE" && (
           <label className="mt-3 flex items-center gap-2 text-sm text-secondary">
             <input type="checkbox" checked={customOdds} onChange={(event) => setCustomOdds(event.target.checked)} />
             Set starting odds
           </label>
+          )}
           {customOdds && <p className="mt-1 text-xs text-muted">Weights currently sum to {oddsSum || 0}. They are normalized to 100%.</p>}
         </div>
       )}
 
+      {type !== "POLL" && (
       <label className="mt-4 block text-sm text-secondary">
         Liquidity ante
         <span className="mt-0.5 block text-xs text-muted">
@@ -206,6 +212,7 @@ export function CreateForm({ balance }: { balance: number }) {
           className="field num mt-1 max-w-[180px]"
         />
       </label>
+      )}
 
       {error && <p className="mt-4 text-sm text-no">{error}</p>}
       <button type="submit" disabled={pending} data-testid="create-submit" className="btn-primary mt-5 h-11 w-full sm:w-auto sm:px-8">

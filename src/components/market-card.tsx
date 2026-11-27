@@ -13,12 +13,12 @@ import type { MarketCard as Card } from "@/lib/types";
 export function MarketCard({ market, signedIn }: { market: Card; signedIn: boolean }) {
   const topicId = TOPICS.find((topic) => topic.label === market.topic)?.id ?? "all";
   const leader = [...market.answers].sort((a, b) => b.probability - a.probability)[0];
-  const headline = market.type === "MULTIPLE" && leader ? leader.probability : market.probability;
-  const headlineLabel = market.type === "MULTIPLE" && leader ? leader.text : "chance";
+  const headline = market.type !== "BINARY" && leader ? leader.probability : market.probability;
+  const headlineLabel = market.type !== "BINARY" && leader ? leader.text : "chance";
   const resolved = resolutionLabel(market.resolution, market.resolutionProb, market.answers, market.type);
 
   return (
-    <article className="surface p-4 transition hover:border-secondary/30" data-testid="market-card" data-slug={market.slug}>
+    <article className="surface p-4 transition hover:border-secondary" data-testid="market-card" data-slug={market.slug}>
       <div className="flex gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs text-secondary">
@@ -34,7 +34,7 @@ export function MarketCard({ market, signedIn }: { market: Card; signedIn: boole
           <Link href={`/market/${market.slug}`} className="mt-1.5 block text-[15.5px] font-medium leading-snug text-ink">
             {market.question}
           </Link>
-          {market.type === "MULTIPLE" ? (
+          {market.type !== "BINARY" ? (
             <div className="mt-3 space-y-1.5">
               {market.answers
                 .slice()
@@ -62,6 +62,10 @@ export function MarketCard({ market, signedIn }: { market: Card; signedIn: boole
               <span className="inline-flex rounded-full bg-pill px-2.5 py-1 text-xs font-medium text-ink">{resolved}</span>
             ) : market.type === "BINARY" ? (
               <QuickBet market={market} signedIn={signedIn} />
+            ) : market.type === "POLL" ? (
+              <Link href={`/market/${market.slug}`} className="btn-primary h-8 px-3 text-[13px]">
+                Vote
+              </Link>
             ) : (
               <Link href={`/market/${market.slug}`} className="btn-primary h-8 px-3 text-[13px]">
                 Trade

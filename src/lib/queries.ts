@@ -1,6 +1,8 @@
 import { TOPICS } from "./constants";
 import { prisma } from "./db";
 import { quoteBinarySell, quoteMultiSell } from "./cpmm";
+import { aggregateOrderBook } from "./order-book";
+import { tallyPoll } from "./polls";
 import type {
   AnswerView,
   CommentView,
@@ -34,20 +36,30 @@ type MarketRecord = {
   creator: Creator;
   answers: { id: string; text: string; probability: number; pool: number; sortIndex: number }[];
   points?: { createdAt: Date; probability: number; snapshot: string }[];
+  pollVotes?: { userId: string; answerId: string }[];
 };
 
-function asType(type: string): "BINARY" | "MULTIPLE" {
-  return type === "MULTIPLE" ? "MULTIPLE" : "BINARY";
+function asType(type: string): "BINARY" | "MULTIPLE" | "POLL" {
+  if (type === "MULTIPLE") return "MULTIPLE";
+  if (type === "POLL") return "POLL";
+  return "BINARY";
 }
 
 function toCard(market: MarketRecord): MarketCard {
   const answers = [...market.answers].sort((a, b) => a.sortIndex - b.sortIndex);
+  const tally =
+    market.type === "POLL"
+      ? tallyPoll(
+          answers.map((answer) => answer.id),
+          (market.pollVotes ?? []).map((vote) => ({ userId: vote.userId, answerId: vote.answerId })),
+        )
+      : null;
   return {
     slug: market.slug,
     question: market.question,
     type: asType(market.type),
     topic: market.topic,
-    probability: market.probability,
+    probability: tally && tally.total > 0 ? Math.max(...tally.shares.map((row) => row.share)) : market.probability,
     volume: market.volume,
     traders: market.traderCount,
     closeAt: market.closeAt.toISOString(),
@@ -55,12 +67,16 @@ function toCard(market: MarketRecord): MarketCard {
     resolution: market.resolution,
     resolutionProb: market.resolutionProb,
     creator: market.creator,
-    answers: answers.map((answer) => ({
-      id: answer.id,
-      text: answer.text,
-      probability: answer.probability,
-      pool: answer.pool,
-    })),
+    answers: answers.map((answer) => {
+      const row = tally?.shares.find((share) => share.answerId === answer.id);
+      return {
+        id: answer.id,
+        text: answer.text,
+        probability: row ? row.share : answer.probability,
+        pool: answer.pool,
+        votes: row?.votes ?? 0,
+      };
+    }),
     ...seriesForCard(market),
   };
 }
@@ -92,6 +108,7 @@ const marketInclude = {
   creator: { select: creatorSelect },
   answers: true,
   points: { select: { createdAt: true, probability: true, snapshot: true }, orderBy: { createdAt: "asc" as const } },
+  pollVotes: { select: { userId: true, answerId: true } },
 } as const;
 
 export async function getFeed(filters: {
@@ -119,6 +136,7 @@ export async function getFeed(filters: {
     if (topic && market.topic !== topic) return false;
     if (filters.type === "binary" && market.type !== "BINARY") return false;
     if (filters.type === "multiple" && market.type !== "MULTIPLE") return false;
+    if (filters.type === "poll" && market.type !== "POLL") return false;
     if (filters.sort === "resolved" && !market.resolution) return false;
     if (!q) return true;
     const answers = market.answers.map((answer) => answer.text.toLowerCase()).join(" ");
@@ -165,12 +183,13 @@ export async function getTopics(): Promise<TopicSummary[]> {
 }
 
 function badgeFor(
-  type: "BINARY" | "MULTIPLE",
+  type: "BINARY" | "MULTIPLE" | "POLL",
   positions: { userId: string; answerId: string; sharesYes: number; sharesNo: number; shares: number }[],
   answers: AnswerView[],
   userId: string,
 ) {
   const mine = positions.filter((position) => position.userId === userId);
+  if (type === "POLL") return null;
   if (type === "BINARY") {
     const position = mine[0];
     if (!position) return null;
@@ -199,6 +218,7 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
         orderBy: { limitProb: "desc" },
       },
       bookmarks: { where: { userId: viewerId ?? "__none__" }, select: { userId: true } },
+      pollVotes: { select: { userId: true, answerId: true } },
     },
   });
   if (!market) return null;
@@ -307,6 +327,14 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
       remaining: order.remaining,
       mine: order.userId === viewerId,
     })),
+    orderBook: aggregateOrderBook(
+      market.limitOrders.map((order) => ({
+        outcome: order.outcome,
+        limitProb: order.limitProb,
+        remaining: order.remaining,
+      })),
+    ),
+    myVote: market.pollVotes.find((vote) => vote.userId === viewerId)?.answerId ?? null,
   };
 }
 
@@ -458,7 +486,7 @@ async function buildPortfolio(
   },
   isOwn: boolean,
 ): Promise<PortfolioData> {
-  const [positions, trades, created, bookmarks, volumeAgg] = await Promise.all([
+  const [positions, trades, created, bookmarks, volumeAgg, worthPoints] = await Promise.all([
     prisma.position.findMany({
       where: { userId: user.id },
       include: { market: { include: marketInclude } },
@@ -484,6 +512,11 @@ async function buildPortfolio(
     prisma.trade.aggregate({
       where: { userId: user.id, side: { in: ["BUY", "SELL"] } },
       _sum: { amount: true },
+    }),
+    prisma.worthPoint.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 240,
     }),
   ]);
 
@@ -532,6 +565,10 @@ async function buildPortfolio(
     trades: history,
     created: created.map(toCard),
     saved: bookmarks.map((bookmark) => toCard(bookmark.market)),
+    worth: [
+      ...[...worthPoints].reverse().map((point) => ({ t: point.createdAt.getTime(), worth: point.worth })),
+      { t: Date.now(), worth: netWorth },
+    ],
   };
 }
 

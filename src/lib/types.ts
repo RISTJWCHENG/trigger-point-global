@@ -9,12 +9,13 @@ export type AnswerView = {
   text: string;
   probability: number;
   pool: number;
+  votes: number;
 };
 
 export type MarketCard = {
   slug: string;
   question: string;
-  type: "BINARY" | "MULTIPLE";
+  type: "BINARY" | "MULTIPLE" | "POLL";
   topic: string;
   probability: number;
   volume: number;
@@ -91,6 +92,8 @@ export type MarketDetail = MarketCard & {
   trades: TradeView[];
   holders: HolderView[];
   limitOrders: LimitOrderView[];
+  orderBook: { yes: { limitProb: number; amount: number }[]; no: { limitProb: number; amount: number }[] };
+  myVote: string | null;
 };
 
 export type LimitOrderView = {
@@ -106,7 +109,7 @@ export type PositionRow = {
   slug: string;
   question: string;
   topic: string;
-  type: "BINARY" | "MULTIPLE";
+  type: "BINARY" | "MULTIPLE" | "POLL";
   side: string;
   outcome: "YES" | "NO" | null;
   answerId: string;
@@ -143,6 +146,7 @@ export type PortfolioData = {
   trades: TradeHistoryRow[];
   created: MarketCard[];
   saved: MarketCard[];
+  worth: { t: number; worth: number }[];
 };
 
 export type LeaderRow = {

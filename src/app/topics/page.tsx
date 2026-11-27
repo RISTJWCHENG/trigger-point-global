@@ -12,7 +12,7 @@ export default async function TopicsPage() {
       <p className="mt-1 text-sm text-secondary">Browse the desk by the question, not the crowd.</p>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {topics.map((topic) => (
-          <Link key={topic.id} href={`/?topic=${topic.id}&fy=0`} className="surface p-4 transition hover:border-secondary/30">
+          <Link key={topic.id} href={`/?topic=${topic.id}&fy=0`} className="surface p-4 transition hover:border-secondary">
             <h2 className="font-medium">{topic.label}</h2>
             <p className="mt-1 text-sm text-secondary">{topic.blurb}</p>
             <p className="mt-3 text-xs text-muted">

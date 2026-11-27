@@ -5,6 +5,8 @@ import { createMarket, placeBet, sellShares, settleMarket } from "./market-servi
 
 async function reset() {
   await prisma.limitOrder.deleteMany();
+  await prisma.pollVote.deleteMany();
+  await prisma.worthPoint.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.bookmark.deleteMany();
   await prisma.pnlEntry.deleteMany();

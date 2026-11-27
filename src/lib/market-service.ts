@@ -13,7 +13,9 @@ import {
   type ResolveInput,
   type Wallet,
 } from "./ledger";
+import { quoteBinarySell, quoteMultiSell } from "./cpmm";
 import { fillLimitOrders, type LimitOrderState } from "./limits";
+import { tallyPoll } from "./polls";
 
 type Tx = Prisma.TransactionClient;
 
@@ -115,7 +117,7 @@ export async function createMarket(input: {
   creatorId: string;
   question: string;
   description: string;
-  type: "BINARY" | "MULTIPLE";
+  type: "BINARY" | "MULTIPLE" | "POLL";
   topic: string;
   closeAt: Date;
   ante: number;
@@ -136,7 +138,8 @@ export async function createMarket(input: {
   if (input.closeAt.getTime() < Date.now() + 60 * 60 * 1000) {
     throw new TradeError("Close the market at least an hour from now");
   }
-  if (!Number.isFinite(input.ante) || input.ante < MIN_ANTE) {
+  const isPoll = input.type === "POLL";
+  if (!isPoll && (!Number.isFinite(input.ante) || input.ante < MIN_ANTE)) {
     throw new TradeError(`Liquidity ante must be at least ${MIN_ANTE} TP`);
   }
   const topic = topicName(input.topic);
@@ -144,12 +147,22 @@ export async function createMarket(input: {
   return prisma.$transaction(async (tx) => {
     const creator = await tx.user.findUnique({ where: { id: input.creatorId } });
     if (!creator) throw new TradeError("Sign in required", 401);
-    if (creator.balance + 1e-8 < input.ante) throw new TradeError("Not enough TP for that ante");
+    if (!isPoll && creator.balance + 1e-8 < input.ante) throw new TradeError("Not enough TP for that ante");
 
     const id = uid("mkt");
-    let ledger: LedgerMarket;
+    let ledger: LedgerMarket | null = null;
     let answerRows: { id: string; text: string; sortIndex: number; pool: number; probability: number }[] = [];
-    if (input.type === "MULTIPLE") {
+    if (isPoll) {
+      const answers = (input.answers ?? []).map((answer) => answer.text.trim()).filter(Boolean);
+      if (answers.length < 2) throw new TradeError("Add at least two choices");
+      answerRows = answers.map((text, index) => ({
+        id: uid("ans"),
+        text,
+        sortIndex: index,
+        pool: 0,
+        probability: 0,
+      }));
+    } else if (input.type === "MULTIPLE") {
       const answers = (input.answers ?? []).map((answer) => ({ text: answer.text.trim(), probability: answer.probability }));
       if (answers.length < 2) throw new TradeError("Add at least two answers");
       if (answers.some((answer) => answer.text.length < 1 || answer.text.length > 80)) {
@@ -171,7 +184,9 @@ export async function createMarket(input: {
     }
 
     const slug = await uniqueSlug(tx, question);
-    await tx.user.update({ where: { id: creator.id }, data: { balance: creator.balance - input.ante } });
+    if (!isPoll) {
+      await tx.user.update({ where: { id: creator.id }, data: { balance: creator.balance - input.ante } });
+    }
     await tx.market.create({
       data: {
         id,
@@ -182,12 +197,12 @@ export async function createMarket(input: {
         topic,
         closeAt: input.closeAt,
         createdAt: new Date(),
-        poolYes: ledger.poolYes,
-        poolNo: ledger.poolNo,
-        p: ledger.p,
-        probability: ledger.probability,
-        pot: ledger.pot,
-        ante: ledger.ante,
+        poolYes: ledger?.poolYes ?? 0,
+        poolNo: ledger?.poolNo ?? 0,
+        p: ledger?.p ?? 0.5,
+        probability: ledger?.probability ?? 0,
+        pot: ledger?.pot ?? 0,
+        ante: isPoll ? 0 : input.ante,
         volume: 0,
         traderCount: 0,
         creatorId: creator.id,
@@ -196,18 +211,20 @@ export async function createMarket(input: {
     if (answerRows.length) {
       await tx.answer.createMany({ data: answerRows.map((answer) => ({ ...answer, marketId: id })) });
     }
-    await tx.probPoint.create({
-      data: {
-        id: uid("pt"),
-        marketId: id,
-        probability: ledger.probability,
-        snapshot:
-          input.type === "BINARY"
-            ? JSON.stringify({ YES: ledger.probability })
-            : JSON.stringify(Object.fromEntries(ledger.answers.map((answer) => [answer.id, answer.probability]))),
-        createdAt: new Date(),
-      },
-    });
+    if (ledger) {
+      await tx.probPoint.create({
+        data: {
+          id: uid("pt"),
+          marketId: id,
+          probability: ledger.probability,
+          snapshot:
+            input.type === "BINARY"
+              ? JSON.stringify({ YES: ledger.probability })
+              : JSON.stringify(Object.fromEntries(answerRows.map((answer) => [answer.id, answer.probability]))),
+          createdAt: new Date(),
+        },
+      });
+    }
     return { slug, id };
   });
 }
@@ -275,6 +292,7 @@ export async function placeBet(
       },
     });
     await matchLimits(tx, market, dbMarket.slug);
+    await snapshotWorth(tx, userId);
     return {
       shares: fill.shares,
       amount: fill.amount,
@@ -343,6 +361,7 @@ export async function sellShares(
       },
     });
     await matchLimits(tx, market, dbMarket.slug);
+    await snapshotWorth(tx, userId);
     return {
       shares: fill.shares,
       amount: fill.amount,
@@ -462,6 +481,7 @@ export async function settleMarket(userId: string, slug: string, input: ResolveI
         createdAt,
       },
     });
+    for (const id of wallets.keys()) await snapshotWorth(tx, id);
     return { resolution: market.resolution, probability: result.probability };
   });
 }
@@ -598,6 +618,7 @@ async function matchLimits(tx: Tx, market: LedgerMarket, slug: string) {
       },
     });
   }
+  for (const userId of touched) await snapshotWorth(tx, userId);
 }
 
 export async function placeLimitOrder(
@@ -636,6 +657,7 @@ export async function placeLimitOrder(
       },
     });
     await matchLimits(tx, market, slug);
+    await snapshotWorth(tx, userId);
     const order = await tx.limitOrder.findUniqueOrThrow({ where: { id: orderId } });
     const updated = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     return {
@@ -659,6 +681,53 @@ export async function cancelLimitOrderById(userId: string, orderId: string) {
     await tx.limitOrder.update({ where: { id: orderId }, data: { status: "CANCELLED", remaining: 0 } });
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     return { balance: user.balance, refunded: order.remaining };
+  });
+}
+
+export async function voteOnPoll(userId: string, slug: string, answerId: string) {
+  const market = await prisma.market.findUnique({
+    where: { slug },
+    include: { answers: { orderBy: { sortIndex: "asc" } }, pollVotes: true },
+  });
+  if (!market) throw new TradeError("Market not found", 404);
+  if (market.type !== "POLL") throw new TradeError("This is not a poll");
+  if (market.resolution) throw new TradeError("This poll is closed");
+  if (!market.answers.some((answer) => answer.id === answerId)) throw new TradeError("Choose one of the options");
+  await prisma.pollVote.upsert({
+    where: { userId_marketId: { userId, marketId: market.id } },
+    create: { id: uid("vote"), userId, marketId: market.id, answerId, createdAt: new Date() },
+    update: { answerId },
+  });
+  const ballots = market.pollVotes
+    .filter((vote) => vote.userId !== userId)
+    .concat([{ userId, answerId, id: "", marketId: market.id, createdAt: new Date() }]);
+  return tallyPoll(
+    market.answers.map((answer) => answer.id),
+    ballots.map((vote) => ({ userId: vote.userId, answerId: vote.answerId })),
+  );
+}
+
+async function snapshotWorth(tx: Tx, userId: string) {
+  const user = await tx.user.findUnique({ where: { id: userId } });
+  if (!user) return;
+  const positions = await tx.position.findMany({
+    where: { userId },
+    include: { market: { include: { answers: true } } },
+  });
+  let marks = 0;
+  for (const position of positions) {
+    if (position.market.resolution || position.market.type === "POLL") continue;
+    if (position.market.type === "BINARY") {
+      const pool = { yes: position.market.poolYes, no: position.market.poolNo, p: position.market.p };
+      marks += quoteBinarySell(pool, "YES", position.sharesYes) + quoteBinarySell(pool, "NO", position.sharesNo);
+    } else {
+      const answers = [...position.market.answers].sort((a, b) => a.sortIndex - b.sortIndex);
+      const index = answers.findIndex((answer) => answer.id === position.answerId);
+      if (index >= 0) marks += quoteMultiSell({ pools: answers.map((answer) => answer.pool) }, index, position.shares);
+    }
+  }
+  await tx.worthPoint.create({
+    data: { id: uid("wth"), userId, worth: user.balance + marks, createdAt: new Date() },
   });
 }
 
@@ -686,6 +755,7 @@ export async function claimDailyBonus(userId: string) {
         createdAt: new Date(),
       },
     });
+    await snapshotWorth(tx, userId);
     return { awarded: true, balance: updated.balance, message: "50 TP added." };
   });
 }

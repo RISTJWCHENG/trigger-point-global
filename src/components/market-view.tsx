@@ -20,8 +20,8 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
   );
   const topicId = TOPICS.find((topic) => topic.label === market.topic)?.id ?? "all";
   const leader = [...market.answers].sort((a, b) => b.probability - a.probability)[0];
-  const headline = market.type === "MULTIPLE" && leader ? leader.probability : market.probability;
-  const headlineLabel = market.type === "MULTIPLE" && leader ? leader.text : "chance";
+  const headline = market.type !== "BINARY" && leader ? leader.probability : market.probability;
+  const headlineLabel = market.type !== "BINARY" && leader ? leader.text : "chance";
   const resolved = resolutionLabel(market.resolution, market.resolutionProb, market.answers, market.type);
   const canResolve = Boolean(user && user.id === market.creatorId && !market.resolution);
 
@@ -38,7 +38,7 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
             {market.topic}
           </Link>
           <span className="text-muted">·</span>
-          <span>{market.type === "BINARY" ? "Binary" : "Multiple choice"}</span>
+          <span>{market.type === "BINARY" ? "Binary" : market.type === "POLL" ? "Poll" : "Multiple choice"}</span>
         </div>
         <div className="mt-3 flex items-start justify-between gap-4">
           <h1 className="text-[26px] font-medium leading-[1.2] tracking-tight text-ink">{market.question}</h1>
@@ -56,14 +56,19 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
           {resolved && <span className="rounded-full bg-pill px-2.5 py-0.5 text-xs font-medium text-ink">{resolved}</span>}
         </div>
         <Actions market={market} user={user} canResolve={canResolve} />
-        <div className="surface mt-5 p-4">
-          <ProbChart points={market.points} answers={market.answers} type={market.type} />
-        </div>
+        {market.type !== "POLL" && (
+          <div className="surface mt-5 p-4">
+            <ProbChart points={market.points} answers={market.answers} type={market.type} />
+          </div>
+        )}
         {market.type === "MULTIPLE" && !market.resolution && (
           <OutcomeBoard market={market} selected={answerId} onSelect={setAnswerId} />
         )}
+        {market.type === "POLL" && <PollBoard market={market} signedIn={Boolean(user)} />}
+        {market.type === "BINARY" && <OrderBook book={market.orderBook} />}
         <Tabs market={market} signedIn={Boolean(user)} />
       </div>
+      {market.type !== "POLL" && (
       <aside className="hidden lg:block">
         <div className="sticky top-6">
           <BetPanel
@@ -75,8 +80,9 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
           />
         </div>
       </aside>
+      )}
 
-      {!market.resolution && (
+      {market.type !== "POLL" && !market.resolution && (
         <div className="fixed inset-x-0 bottom-16 z-30 border-t border-line bg-canvas px-4 py-3 lg:hidden">
           <div className="flex items-center gap-3">
             <div>
@@ -91,7 +97,7 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
       )}
       {sheet && (
         <div className="fixed inset-0 z-[80] lg:hidden">
-          <button type="button" aria-label="Close trade panel" className="absolute inset-0 bg-ink/30" onClick={() => setSheet(false)} />
+          <button type="button" aria-label="Close trade panel" className="absolute inset-0 scrim" onClick={() => setSheet(false)} />
           <div className="absolute inset-x-0 bottom-0 max-h-[92vh] overflow-auto rounded-t-2xl bg-canvas p-4 pb-6 shadow-sheet">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-medium">Trade</h2>
@@ -113,6 +119,96 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
   );
 }
 
+function OrderBook({ book }: { book: MarketDetail["orderBook"] }) {
+  return (
+    <section className="surface mt-4 p-4" data-testid="order-book">
+      <h2 className="text-sm font-medium text-ink">Order book</h2>
+      <p className="mt-0.5 text-xs text-muted">Resting limit orders from every trader, best price first.</p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        <BookSide title="YES bids" rows={book.yes} tone="yes" />
+        <BookSide title="NO bids" rows={book.no} tone="no" />
+      </div>
+    </section>
+  );
+}
+
+function BookSide({
+  title,
+  rows,
+  tone,
+}: {
+  title: string;
+  rows: MarketDetail["orderBook"]["yes"];
+  tone: "yes" | "no";
+}) {
+  return (
+    <div>
+      <h3 className={cn("text-xs font-medium uppercase tracking-wide", tone === "yes" ? "text-yes" : "text-no")}>{title}</h3>
+      <ul className="mt-2 divide-y divide-line">
+        {rows.length === 0 && <li className="py-2 text-sm text-muted">No resting orders</li>}
+        {rows.map((row) => (
+          <li key={`${tone}-${row.limitProb}`} className="flex items-center justify-between py-1.5 text-sm">
+            <span className="num">{formatPercent(row.limitProb, 1)}</span>
+            <span className="num text-secondary">{formatTp(row.amount)} TP</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PollBoard({ market, signedIn }: { market: MarketDetail; signedIn: boolean }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, setPending] = useState<string | null>(null);
+  const total = market.answers.reduce((sum, answer) => sum + answer.votes, 0);
+  async function vote(answerId: string) {
+    if (!signedIn) {
+      router.push(`/signin?next=/market/${market.slug}`);
+      return;
+    }
+    setPending(answerId);
+    try {
+      await postJson(`/api/markets/${market.slug}/vote`, { answerId });
+      toast(market.myVote ? "Vote updated" : "Vote counted");
+      router.refresh();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Vote failed");
+    } finally {
+      setPending(null);
+    }
+  }
+  return (
+    <section className="surface mt-4 divide-y divide-line" data-testid="poll-board">
+      <div className="px-4 py-3 text-sm text-secondary">{total} {total === 1 ? "vote" : "votes"}. You can change yours until the poll closes.</div>
+      {market.answers.map((answer) => (
+        <div key={answer.id} className="flex items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium">{answer.text}</span>
+              <span className="num text-secondary">
+                {formatPercent(answer.probability, 1)} · {answer.votes}
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-pill">
+              <div className="h-full rounded-full bg-action" style={{ width: `${Math.max(answer.votes ? 2 : 0, answer.probability * 100)}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid={`vote-${answer.id}`}
+            disabled={pending === answer.id}
+            onClick={() => void vote(answer.id)}
+            className={cn("btn h-8 shrink-0 px-3 text-xs", market.myVote === answer.id ? "btn-primary" : "border border-line bg-card text-ink")}
+          >
+            {market.myVote === answer.id ? "Your vote" : "Vote"}
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function OutcomeBoard({
   market,
   selected,
@@ -126,7 +222,7 @@ function OutcomeBoard({
   return (
     <section className="surface mt-4 divide-y divide-line" data-testid="outcome-board">
       {ranked.map((answer) => (
-        <div key={answer.id} className={cn("flex items-center gap-3 px-4 py-3", selected === answer.id && "bg-pill/60")}>
+        <div key={answer.id} className={cn("flex items-center gap-3 px-4 py-3", selected === answer.id && "bg-pill")}>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="truncate font-medium">{answer.text}</span>
@@ -238,7 +334,7 @@ function ResolveModal({ market, onClose }: { market: MarketDetail; onClose: () =
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 p-4 sm:items-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center scrim p-4 sm:items-center">
       <div className="surface w-full max-w-md p-5" role="dialog" aria-labelledby="resolve-title">
         <h2 id="resolve-title" className="text-lg font-medium">Resolve market</h2>
         <p className="mt-1 text-sm text-secondary">This settles every position and cannot be undone.</p>
@@ -558,7 +654,7 @@ function About({ market }: { market: MarketDetail }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-pill/70 px-3 py-2">
+    <div className="rounded-xl bg-pill px-3 py-2">
       <dt className="text-[11px] uppercase tracking-wide text-muted">{label}</dt>
       <dd className="num mt-1 text-ink">{value}</dd>
     </div>

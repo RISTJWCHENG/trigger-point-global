@@ -29,7 +29,7 @@ export function NotificationsView({ items }: { items: NotificationView[] }) {
         {items.length === 0 && <li className="px-4 py-8 text-sm text-secondary">Nothing yet. Trades, resolutions, and replies land here.</li>}
         {items.map((item) => (
           <li key={item.id}>
-            <button type="button" onClick={() => void read(item.id, item.href)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-pill/60">
+            <button type="button" onClick={() => void read(item.id, item.href)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-pill">
               <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", item.read ? "bg-transparent" : "bg-action")} />
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-ink">{item.title}</span>

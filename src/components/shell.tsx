@@ -70,7 +70,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
                 data-testid={`nav-${link.label.toLowerCase()}`}
                 className={cn(
                   "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition",
-                  active(link.match) ? "bg-pill font-medium text-ink" : "text-secondary hover:bg-pill/80 hover:text-ink",
+                  active(link.match) ? "bg-pill font-medium text-ink" : "text-secondary hover:bg-pill hover:text-ink",
                 )}
               >
                 <link.icon />
@@ -88,7 +88,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
           </nav>
           <div className="shrink-0 border-t border-line p-3">
             {user ? (
-              <div className="rounded-xl bg-pill/80 p-3">
+              <div className="rounded-xl bg-pill p-3">
                 <Link href={`/profile/${user.username}`} className="flex items-center gap-2.5">
                   <Avatar name={user.name} color={user.avatarColor} />
                   <span className="min-w-0">

@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       question?: string;
       description?: string;
-      type?: "BINARY" | "MULTIPLE";
+      type?: "BINARY" | "MULTIPLE" | "POLL";
       topic?: string;
       closeAt?: string;
       ante?: number;
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       creatorId: user.id,
       question: body.question ?? "",
       description: body.description ?? "",
-      type: body.type === "MULTIPLE" ? "MULTIPLE" : "BINARY",
+      type: body.type === "MULTIPLE" ? "MULTIPLE" : body.type === "POLL" ? "POLL" : "BINARY",
       topic: body.topic ?? "",
       closeAt: new Date(body.closeAt ?? ""),
       ante: Number(body.ante),
