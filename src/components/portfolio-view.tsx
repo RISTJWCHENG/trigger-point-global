@@ -31,6 +31,7 @@ export function PortfolioView({ data }: { data: PortfolioData }) {
         </div>
       </div>
       {data.user.bio && <p className="mt-3 max-w-xl text-sm text-secondary">{data.user.bio}</p>}
+      <ProfileSocial data={data} />
 
       {data.worth.length > 1 && <WorthChart points={data.worth} />}
 
@@ -61,6 +62,71 @@ export function PortfolioView({ data }: { data: PortfolioData }) {
         {tab === "Created" && <CardList markets={data.created} empty="No markets created yet." signedIn={data.isOwn} />}
         {tab === "Saved" && <CardList markets={data.saved} empty="Save a market from its page to watch it here." signedIn />}
       </div>
+    </div>
+  );
+}
+
+function ProfileSocial({ data }: { data: PortfolioData }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [follows, setFollows] = useState(data.viewerFollows);
+  const [followers, setFollowers] = useState(data.followers);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("10");
+  const [note, setNote] = useState("");
+  const [pending, setPending] = useState(false);
+  async function toggle() {
+    const next = !follows;
+    await postJson(`/api/profile/${data.user.username}/follow`, { follow: next });
+    setFollows(next);
+    setFollowers((count) => count + (next ? 1 : -1));
+  }
+  async function send() {
+    setPending(true);
+    try {
+      await postJson(`/api/profile/${data.user.username}/tip`, { amount: Number(amount), note });
+      toast(`Sent ${amount} TP`);
+      setOpen(false);
+      router.refresh();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not send TP");
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <p className="text-sm text-secondary" data-testid="follow-counts">
+        <span className="num text-ink">{followers}</span> followers
+        <span className="text-muted"> · </span>
+        <span className="num text-ink">{data.following}</span> following
+      </p>
+      {!data.isOwn && (
+        <>
+          <button type="button" data-testid="follow-toggle" onClick={() => void toggle()} className={follows ? "btn h-8 border border-line bg-card px-3 text-xs" : "btn-primary h-8 px-3 text-xs"}>
+            {follows ? "Following" : "Follow"}
+          </button>
+          <button type="button" data-testid="send-tp-open" onClick={() => setOpen(true)} className="btn h-8 border border-line bg-card px-3 text-xs text-ink">
+            Send TP
+          </button>
+        </>
+      )}
+      {open && (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center p-4 sm:items-center">
+          <button type="button" aria-label="Close send TP" className="absolute inset-0 scrim" onClick={() => setOpen(false)} />
+          <div className="surface relative z-10 w-full max-w-sm p-4" data-testid="send-tp-modal">
+            <h2 className="text-sm font-medium text-ink">Send TP to @{data.user.username}</h2>
+            <input data-testid="send-tp-amount" value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" className="field num mt-3" />
+            <input data-testid="send-tp-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Optional note" className="field mt-2" />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+              <button type="button" className="btn-primary" data-testid="send-tp-submit" disabled={pending} onClick={() => void send()}>
+                {pending ? "Sending" : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

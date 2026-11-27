@@ -1,10 +1,13 @@
 import { afterAll, beforeEach, expect, it } from "vitest";
 import { registerUser } from "./auth";
 import { prisma } from "./db";
-import { addLiquidity, createMarket, deleteComment, editComment, placeBet, postComment, sellShares, settleMarket, toggleCommentLike } from "./market-service";
+import { addLiquidity, createMarket, deleteComment, editComment, placeBet, postComment, sellShares, sendTip, setFollow, settleMarket, toggleCommentLike, updateMarketByCreator } from "./market-service";
 
 async function reset() {
   await prisma.commentLike.deleteMany();
+  await prisma.tip.deleteMany();
+  await prisma.follow.deleteMany();
+  await prisma.marketUpdate.deleteMany();
   await prisma.limitOrder.deleteMany();
   await prisma.pollVote.deleteMany();
   await prisma.worthPoint.deleteMany();
@@ -222,4 +225,55 @@ it("likes, edits, and deletes a comment", async () => {
   await deleteComment(user.id, comment.id);
   const row = await prisma.comment.findUniqueOrThrow({ where: { id: comment.id } });
   expect(row.deleted).toBe(true);
+});
+
+it("follows and unfollows another trader, and refuses a self follow", async () => {
+  const ada = await registerUser({ username: "adaf", name: "Ada Follow", email: "adaf@example.com", password: "secret12" });
+  const bea = await registerUser({ username: "beaf", name: "Bea Follow", email: "beaf@example.com", password: "secret12" });
+  await expect(setFollow(ada.id, "adaf", true)).rejects.toThrow(/yourself/);
+  expect(await setFollow(ada.id, "beaf", true)).toEqual({ following: true });
+  expect(await prisma.follow.count({ where: { followerId: ada.id, followingId: bea.id } })).toBe(1);
+  expect(await setFollow(ada.id, "beaf", false)).toEqual({ following: false });
+  expect(await prisma.follow.count()).toBe(0);
+});
+
+it("transfers TP atomically and rejects an empty purse or a self transfer", async () => {
+  const ada = await registerUser({ username: "adat", name: "Ada Tip", email: "adat@example.com", password: "secret12" });
+  const bea = await registerUser({ username: "beat", name: "Bea Tip", email: "beat@example.com", password: "secret12" });
+  const before = await wealth();
+  await sendTip(ada.id, "beat", 25, "for the close");
+  const from = await prisma.user.findUniqueOrThrow({ where: { id: ada.id } });
+  const to = await prisma.user.findUniqueOrThrow({ where: { id: bea.id } });
+  expect(from.balance).toBeCloseTo(975, 4);
+  expect(to.balance).toBeCloseTo(1025, 4);
+  expect(await wealth()).toBeCloseTo(before, 2);
+  await expect(sendTip(ada.id, "adat", 5)).rejects.toThrow(/yourself/);
+  await expect(sendTip(ada.id, "beat", 5000)).rejects.toThrow(/Not enough/);
+  expect((await prisma.user.findUniqueOrThrow({ where: { id: ada.id } })).balance).toBeCloseTo(975, 4);
+});
+
+it("lets only the creator rewrite criteria and move the close", async () => {
+  const ada = await registerUser({ username: "adac", name: "Ada Create", email: "adac@example.com", password: "secret12" });
+  const bea = await registerUser({ username: "beac", name: "Bea Create", email: "beac@example.com", password: "secret12" });
+  const created = await createMarket({
+    creatorId: ada.id,
+    question: "Will the creator be allowed to extend this close?",
+    description: "The original criteria stay until the creator posts a revision.",
+    type: "BINARY",
+    topic: "tech",
+    closeAt: future(10),
+    ante: 80,
+    probability: 0.5,
+  });
+  await expect(updateMarketByCreator(bea.id, created.slug, { note: "Not mine" })).rejects.toThrow(/Only the creator/);
+  const nextClose = future(40).toISOString();
+  await updateMarketByCreator(ada.id, created.slug, {
+    description: "Revised criteria: this resolves on the written source, not a rumor.",
+    note: "Clarified the source.",
+    closeAt: nextClose,
+  });
+  const market = await prisma.market.findUniqueOrThrow({ where: { slug: created.slug }, include: { updates: true } });
+  expect(market.description).toContain("Revised criteria");
+  expect(market.closeAt.toISOString()).toBe(nextClose);
+  expect(market.updates.map((update) => update.kind).sort()).toEqual(["close", "description", "note"]);
 });

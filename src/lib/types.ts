@@ -95,6 +95,7 @@ export type MarketDetail = MarketCard & {
   related: MarketCard[];
   resolvedAt: string | null;
   resolutionNote: string;
+  updates: { id: string; kind: string; body: string; createdAt: string }[];
   bookmarked: boolean;
   holdings: HoldingView[];
   points: PointView[];
@@ -146,6 +147,9 @@ export type TradeHistoryRow = {
 export type PortfolioData = {
   user: Creator & { username: string; bio: string; createdAt: string; balance: number; startingBalance: number };
   isOwn: boolean;
+  followers: number;
+  following: number;
+  viewerFollows: boolean;
   netWorth: number;
   cash: number;
   positionValue: number;

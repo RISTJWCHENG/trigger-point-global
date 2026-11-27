@@ -358,6 +358,7 @@ function Actions({ market, user, canResolve }: { market: MarketDetail; user: Ses
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
+  const [manage, setManage] = useState<"note" | "close" | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [saved, setSaved] = useState(market.bookmarked);
 
@@ -418,12 +419,21 @@ function Actions({ market, user, canResolve }: { market: MarketDetail; user: Ses
           )}
         </div>
         {canResolve && (
-          <button type="button" data-testid="resolve-open" onClick={() => setOpen(true)} className="btn-primary h-8 px-3 text-xs">
-            Resolve
-          </button>
+          <>
+            <button type="button" data-testid="edit-market" onClick={() => setManage("note")} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
+              Update
+            </button>
+            <button type="button" data-testid="extend-close" onClick={() => setManage("close")} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
+              Close time
+            </button>
+            <button type="button" data-testid="resolve-open" onClick={() => setOpen(true)} className="btn-primary h-8 px-3 text-xs">
+              Resolve
+            </button>
+          </>
         )}
       </div>
       {open && <ResolveModal market={market} onClose={() => setOpen(false)} />}
+      {manage && <ManageModal market={market} mode={manage} onClose={() => setManage(null)} />}
     </>
   );
 }
@@ -666,20 +676,112 @@ function HolderColumn({ title, rows, tone }: { title: string; rows: MarketDetail
 
 function About({ market }: { market: MarketDetail }) {
   return (
-    <div className="max-w-2xl">
-      <h3 className="text-sm font-medium text-ink">Resolution criteria</h3>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-secondary">{market.description}</p>
-      <dl className="mt-5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+    <div className="max-w-2xl" data-testid="about-panel">
+      <h3 className="text-sm font-medium text-ink">Pool mechanics</h3>
+      <p className="mt-2 text-sm leading-relaxed text-secondary">
+        {market.type === "POLL"
+          ? "Polls do not use a pool. Each person has one changeable vote."
+          : market.type === "MULTIPLE"
+            ? "Multiple-choice prices use a fixed-product pool. Outcome odds sum to 100%. There is no trading fee."
+            : "Binary prices use CPMM-1. The weight p is fixed at creation. Buying mints a complete set, then removes shares from the side you bought. There is no trading fee."}
+      </p>
+      <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+        <Stat label="Market ID" value={market.id} />
         <Stat label="Created" value={formatDateTime(market.createdAt)} />
         <Stat label="Closes" value={formatDateTime(market.closeAt)} />
-        <Stat label="Liquidity ante" value={`${formatTp(market.ante)} TP`} />
+        <Stat label="Liquidity" value={`${formatTp(market.liquidity)} TP`} />
         <Stat label="Pool cash" value={`${formatTp(market.pot)} TP`} />
         <Stat label="Volume" value={`${formatTp(market.volume)} TP`} />
+        {market.type === "BINARY" && <Stat label="YES reserve" value={formatTp(market.poolYes)} />}
+        {market.type === "BINARY" && <Stat label="NO reserve" value={formatTp(market.poolNo)} />}
+        {market.type === "BINARY" && <Stat label="p" value={market.p.toFixed(4)} />}
         <Stat label="Traders" value={String(market.traders)} />
       </dl>
-      <p className="mt-4 text-xs leading-relaxed text-muted">
-        Binary prices use a CPMM-1 pool. Multiple-choice prices use a fixed-product pool whose outcome odds sum to 100%. There is no trading fee. TP is play money.
-      </p>
+      {market.type === "MULTIPLE" && (
+        <ul className="mt-4 space-y-1 text-sm text-secondary">
+          {market.answers.map((answer) => (
+            <li key={answer.id} className="flex justify-between gap-3">
+              <span>{answer.text}</span>
+              <span className="num">pool {formatTp(answer.pool)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="mt-6 text-sm font-medium text-ink">Creator updates</h3>
+      {market.updates.length === 0 && !market.resolutionNote && (
+        <p className="mt-2 text-sm text-secondary">No updates yet.</p>
+      )}
+      <ul className="mt-2 space-y-3">
+        {market.resolutionNote && (
+          <li className="text-sm">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Resolution</div>
+            <p className="mt-1 text-secondary">{market.resolutionNote}</p>
+          </li>
+        )}
+        {market.updates.map((update) => (
+          <li key={update.id} className="text-sm">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+              {update.kind} · {formatDateTime(update.createdAt)}
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-secondary">{update.body}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ManageModal({ market, mode, onClose }: { market: MarketDetail; mode: "note" | "close"; onClose: () => void }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [description, setDescription] = useState(market.description);
+  const [note, setNote] = useState("");
+  const [closeAt, setCloseAt] = useState(market.closeAt.slice(0, 16));
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  async function save() {
+    setPending(true);
+    setError(null);
+    try {
+      await postJson(`/api/markets/${market.slug}/manage`, mode === "close" ? { closeAt: new Date(closeAt).toISOString() } : { description, note });
+      toast(mode === "close" ? "Close time updated" : "Update posted");
+      onClose();
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update");
+      setPending(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end justify-center p-4 sm:items-center">
+      <button type="button" aria-label="Close editor" className="absolute inset-0 scrim" onClick={onClose} />
+      <div className="surface relative z-10 w-full max-w-lg p-4" data-testid="manage-modal">
+        <h2 className="text-sm font-medium text-ink">{mode === "close" ? "Change close time" : "Update the market"}</h2>
+        {mode === "close" ? (
+          <label className="mt-3 block text-sm text-secondary">
+            Closes
+            <input data-testid="manage-close" type="datetime-local" value={closeAt} onChange={(event) => setCloseAt(event.target.value)} className="field mt-1" />
+          </label>
+        ) : (
+          <>
+            <label className="mt-3 block text-sm text-secondary">
+              Resolution criteria
+              <textarea data-testid="manage-description" value={description} onChange={(event) => setDescription(event.target.value)} className="field mt-1 min-h-28" />
+            </label>
+            <label className="mt-3 block text-sm text-secondary">
+              Update note
+              <textarea data-testid="manage-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="What changed, and why" className="field mt-1 min-h-20" />
+            </label>
+          </>
+        )}
+        {error && <p className="mt-2 text-sm text-no">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-primary" data-testid="manage-save" disabled={pending} onClick={() => void save()}>
+            {pending ? "Saving" : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

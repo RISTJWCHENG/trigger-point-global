@@ -801,6 +801,98 @@ export async function voteOnPoll(userId: string, slug: string, answerId: string)
   );
 }
 
+export async function setFollow(userId: string, username: string, follow: boolean) {
+  const target = await prisma.user.findUnique({ where: { username } });
+  if (!target) throw new TradeError("Trader not found", 404);
+  if (target.id === userId) throw new TradeError("You cannot follow yourself");
+  if (follow) {
+    await prisma.follow.upsert({
+      where: { followerId_followingId: { followerId: userId, followingId: target.id } },
+      create: { followerId: userId, followingId: target.id },
+      update: {},
+    });
+  } else {
+    await prisma.follow.deleteMany({ where: { followerId: userId, followingId: target.id } });
+  }
+  return { following: follow };
+}
+
+export async function sendTip(fromId: string, username: string, amount: number, note = "") {
+  if (!Number.isFinite(amount) || amount < MIN_BET) throw new TradeError(`Send at least ${MIN_BET} TP`);
+  const text = note.trim();
+  if (text.length > 280) throw new TradeError("Keep the note under 280 characters");
+  return prisma.$transaction(async (tx) => {
+    const from = await tx.user.findUnique({ where: { id: fromId } });
+    const to = await tx.user.findUnique({ where: { username } });
+    if (!from || !to) throw new TradeError("Trader not found", 404);
+    if (from.id === to.id) throw new TradeError("You cannot send TP to yourself");
+    if (from.balance + 1e-8 < amount) throw new TradeError("Not enough TP in your balance");
+    await tx.user.update({ where: { id: from.id }, data: { balance: from.balance - amount } });
+    await tx.user.update({ where: { id: to.id }, data: { balance: { increment: amount } } });
+    await tx.tip.create({
+      data: { id: uid("tip"), fromId: from.id, toId: to.id, amount, note: text, createdAt: new Date() },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId: to.id,
+        type: "TIP",
+        title: "TP received",
+        body: `${from.name} sent you ${amount.toFixed(2)} TP${text ? `: ${text}` : "."}`,
+        href: `/profile/${from.username}`,
+        createdAt: new Date(),
+      },
+    });
+    await snapshotWorth(tx, from.id);
+    await snapshotWorth(tx, to.id);
+    return { balance: from.balance - amount };
+  });
+}
+
+export async function updateMarketByCreator(
+  userId: string,
+  slug: string,
+  input: { description?: string; note?: string; closeAt?: string },
+) {
+  const market = await prisma.market.findUnique({ where: { slug } });
+  if (!market) throw new TradeError("Market not found", 404);
+  if (market.creatorId !== userId) throw new TradeError("Only the creator can edit this market", 403);
+  if (market.resolution) throw new TradeError("This market is already resolved");
+  const data: { description?: string; closeAt?: Date } = {};
+  const logs: { kind: string; body: string }[] = [];
+  if (input.description !== undefined) {
+    const description = input.description.trim();
+    if (description.length < 20 || description.length > 4000) {
+      throw new TradeError("Resolution criteria need between 20 and 4000 characters");
+    }
+    data.description = description;
+    logs.push({ kind: "description", body: "Resolution criteria were updated." });
+  }
+  const note = input.note?.trim() ?? "";
+  if (note) {
+    if (note.length > 2000) throw new TradeError("Keep the update under 2000 characters");
+    logs.push({ kind: "note", body: note });
+  }
+  if (input.closeAt) {
+    const closeAt = new Date(input.closeAt);
+    if (Number.isNaN(closeAt.getTime()) || closeAt.getTime() < Date.now() + 60 * 60 * 1000) {
+      throw new TradeError("Close the market at least an hour from now");
+    }
+    data.closeAt = closeAt;
+    logs.push({ kind: "close", body: `Close time set to ${closeAt.toISOString()}.` });
+  }
+  if (!logs.length && !data.description && !data.closeAt) throw new TradeError("Nothing to update");
+  await prisma.$transaction(async (tx) => {
+    if (Object.keys(data).length) await tx.market.update({ where: { id: market.id }, data });
+    if (logs.length) {
+      await tx.marketUpdate.createMany({
+        data: logs.map((log) => ({ id: uid("upd"), marketId: market.id, kind: log.kind, body: log.body, createdAt: new Date() })),
+      });
+    }
+  });
+  return { ok: true };
+}
+
 async function snapshotWorth(tx: Tx, userId: string) {
   const user = await tx.user.findUnique({ where: { id: userId } });
   if (!user) return;

@@ -126,12 +126,17 @@ export async function getFeed(filters: {
     filters.topic && filters.topic !== "all" ? TOPICS.find((item) => item.id === filters.topic)?.label : null;
   const q = filters.q?.trim().toLowerCase() ?? "";
   let interest = new Set<string>();
+  let followed = new Set<string>();
   if (filters.fy === "1" && filters.userId) {
-    const positions = await prisma.position.findMany({
-      where: { userId: filters.userId },
-      select: { market: { select: { topic: true } } },
-    });
+    const [positions, follows] = await Promise.all([
+      prisma.position.findMany({
+        where: { userId: filters.userId },
+        select: { market: { select: { topic: true } } },
+      }),
+      prisma.follow.findMany({ where: { followerId: filters.userId }, select: { followingId: true } }),
+    ]);
     interest = new Set(positions.map((position) => position.market.topic));
+    followed = new Set(follows.map((follow) => follow.followingId));
   }
 
   let rows = markets.filter((market) => {
@@ -150,7 +155,9 @@ export async function getFeed(filters: {
   const score = (market: (typeof rows)[number]) => {
     const ageHours = Math.max(1, (now - market.createdAt.getTime()) / 3_600_000);
     const base = (market.volume + 40) / Math.pow(ageHours, 0.62);
-    return interest.has(market.topic) ? base * 1.4 : base;
+    const topicBoost = interest.has(market.topic) ? 1.4 : 1;
+    const followBoost = followed.has(market.creatorId) ? 1.8 : 1;
+    return base * topicBoost * followBoost;
   };
 
   const sort = filters.sort || "trending";
@@ -224,6 +231,7 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
       },
       bookmarks: { where: { userId: viewerId ?? "__none__" }, select: { userId: true } },
       pollVotes: { select: { userId: true, answerId: true } },
+      updates: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!market) return null;
@@ -305,6 +313,12 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
     related: await getRelated(market.topic, market.slug),
     resolvedAt: market.resolvedAt?.toISOString() ?? null,
     resolutionNote: market.resolutionNote,
+    updates: market.updates.map((update) => ({
+      id: update.id,
+      kind: update.kind,
+      body: update.body,
+      createdAt: update.createdAt.toISOString(),
+    })),
     bookmarked: market.bookmarks.length > 0,
     holdings: mine.map((position) => ({
       answerId: position.answerId,
@@ -497,7 +511,7 @@ export async function getPortfolio(userId: string, viewerId?: string | null): Pr
     },
   });
   if (!user) return null;
-  return buildPortfolio(user, viewerId === user.id);
+  return buildPortfolio(user, viewerId);
 }
 
 export async function getProfile(username: string, viewerId?: string | null): Promise<PortfolioData | null> {
@@ -515,7 +529,7 @@ export async function getProfile(username: string, viewerId?: string | null): Pr
     },
   });
   if (!user) return null;
-  return buildPortfolio(user, viewerId === user.id);
+  return buildPortfolio(user, viewerId);
 }
 
 async function buildPortfolio(
@@ -529,9 +543,10 @@ async function buildPortfolio(
     startingBalance: number;
     createdAt: Date;
   },
-  isOwn: boolean,
+  viewerId?: string | null,
 ): Promise<PortfolioData> {
-  const [positions, trades, created, bookmarks, volumeAgg, worthPoints] = await Promise.all([
+  const isOwn = viewerId === user.id;
+  const [positions, trades, created, bookmarks, volumeAgg, worthPoints, followers, following, viewerFollow] = await Promise.all([
     prisma.position.findMany({
       where: { userId: user.id },
       include: { market: { include: marketInclude } },
@@ -563,6 +578,11 @@ async function buildPortfolio(
       orderBy: { createdAt: "desc" },
       take: 240,
     }),
+    prisma.follow.count({ where: { followingId: user.id } }),
+    prisma.follow.count({ where: { followerId: user.id } }),
+    viewerId && viewerId !== user.id
+      ? prisma.follow.findUnique({ where: { followerId_followingId: { followerId: viewerId, followingId: user.id } } })
+      : Promise.resolve(null),
   ]);
 
   const shaped = positions.map((position) => ({
@@ -600,6 +620,9 @@ async function buildPortfolio(
       startingBalance: user.startingBalance,
     },
     isOwn,
+    followers,
+    following,
+    viewerFollows: Boolean(viewerFollow),
     netWorth,
     cash,
     positionValue,

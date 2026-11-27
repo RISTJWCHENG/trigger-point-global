@@ -61,9 +61,12 @@ export function FeedHeader({ query, signedIn }: { query: FeedQuery; signedIn: bo
             name="q"
             defaultValue={query.q}
             placeholder="Search markets"
-            className="field h-11 pl-10"
+            className="field h-11 pl-10 pr-14"
             data-testid="search"
           />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-line px-1.5 py-0.5 text-[10px] font-medium tracking-[0.08em] text-muted">
+            ⌘K
+          </span>
         </label>
       </form>
 

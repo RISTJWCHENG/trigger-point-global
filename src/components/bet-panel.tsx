@@ -444,7 +444,7 @@ function OpenOrders({ market }: { market: MarketDetail }) {
   if (!mine.length && market.limitOrders.length === 0) return null;
   return (
     <div className="mt-4 border-t border-line pt-3">
-      <h3 className="text-xs font-medium uppercase tracking-wide text-muted">Open limits</h3>
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted [word-spacing:0.28em]">Open limits</h3>
       <ul className="mt-2 space-y-2">
         {market.limitOrders.map((order) => (
           <li key={order.id} className="flex items-center justify-between gap-2 text-xs">

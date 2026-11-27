@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 import { Avatar } from "./avatar";
+import { CommandPalette } from "./command-palette";
 import { cn, formatTp } from "@/lib/format";
 
 export type ShellUser = {
@@ -125,6 +126,9 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
             <p className="mt-3 px-1 pb-1 text-[11px] leading-relaxed text-secondary">
               Play-money markets. TP has no cash value.
             </p>
+            <Link href="/developers" className="mt-1 block px-1 text-[11px] text-muted hover:text-ink">
+              API reference
+            </Link>
             <ThemeSwitch />
           </div>
         </aside>
@@ -159,6 +163,7 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
         </header>
 
         <main className="pb-20 lg:pb-10 lg:pl-[248px]">{children}</main>
+        <CommandPalette />
 
         <nav className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-5 border-t border-line bg-canvas lg:hidden">
           {[

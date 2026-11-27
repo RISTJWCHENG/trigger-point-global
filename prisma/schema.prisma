@@ -33,6 +33,10 @@ model User {
   pollVotes     PollVote[]
   worthPoints   WorthPoint[]
   commentLikes  CommentLike[]
+  following     Follow[]       @relation("Following")
+  followers     Follow[]       @relation("Followers")
+  tipsSent      Tip[]          @relation("TipsSent")
+  tipsReceived  Tip[]          @relation("TipsReceived")
 }
 
 model Market {
@@ -70,6 +74,7 @@ model Market {
   pnlEntries  PnlEntry[]
   limitOrders LimitOrder[]
   pollVotes   PollVote[]
+  updates     MarketUpdate[]
 
   @@index([topic, createdAt])
   @@index([resolvedAt])
@@ -181,6 +186,41 @@ model Comment {
   editedAt  DateTime?
   deleted   Boolean   @default(false)
   likes     CommentLike[]
+
+  @@index([marketId, createdAt])
+}
+
+model Follow {
+  followerId  String
+  followingId String
+  follower    User     @relation("Following", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@id([followerId, followingId])
+  @@index([followingId])
+}
+
+model Tip {
+  id        String   @id
+  fromId    String
+  toId      String
+  from      User     @relation("TipsSent", fields: [fromId], references: [id], onDelete: Cascade)
+  to        User     @relation("TipsReceived", fields: [toId], references: [id], onDelete: Cascade)
+  amount    Float
+  note      String   @default("")
+  createdAt DateTime
+
+  @@index([toId, createdAt])
+}
+
+model MarketUpdate {
+  id        String   @id
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  kind      String
+  body      String
+  createdAt DateTime
 
   @@index([marketId, createdAt])
 }
