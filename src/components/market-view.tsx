@@ -4,13 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Avatar } from "./avatar";
+import { CommentThread } from "./comment-thread";
 import { BetPanel } from "./bet-panel";
 import { ProbChart } from "./prob-chart";
+import { RichText } from "./rich-text";
+import { parseMarkdown } from "@/lib/markdown";
+import { embedSnippet } from "@/lib/related";
 import { useToast } from "./shell";
 import { TOPICS } from "@/lib/constants";
 import { postJson } from "@/lib/client";
 import { cn, formatClose, formatDateTime, formatPercent, formatShares, formatTp, resolutionLabel } from "@/lib/format";
-import type { CommentView, MarketDetail } from "@/lib/types";
+import type { MarketDetail } from "@/lib/types";
 import type { ShellUser as Session } from "./shell";
 
 export function MarketView({ market, user }: { market: MarketDetail; user: Session | null }) {
@@ -24,6 +28,8 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
   const headlineLabel = market.type !== "BINARY" && leader ? leader.text : "chance";
   const resolved = resolutionLabel(market.resolution, market.resolutionProb, market.answers, market.type);
   const canResolve = Boolean(user && user.id === market.creatorId && !market.resolution);
+  const blocked = Boolean(user && market.creatorBlocked && user.id === market.creatorId);
+  const [subsidyOpen, setSubsidyOpen] = useState(false);
 
   return (
     <div className="mx-auto grid max-w-[1120px] gap-6 px-4 py-6 pb-36 lg:grid-cols-[minmax(0,1fr)_332px] lg:px-8 lg:pb-10">
@@ -51,15 +57,44 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-secondary">
           <span className="num">{formatTp(market.volume, "compact")} TP volume</span>
+          <span className="num" data-testid="market-liquidity">{formatTp(market.liquidity, "compact")} TP liquidity</span>
           <span className="num">{market.traders} traders</span>
           <span>{formatClose(market.closeAt)}</span>
+          {market.type !== "POLL" && !market.resolution && user && (
+            <button type="button" className="text-ink underline decoration-line underline-offset-2" data-testid="add-liquidity" onClick={() => setSubsidyOpen(true)}>
+              Add liquidity
+            </button>
+          )}
           {resolved && <span className="rounded-full bg-pill px-2.5 py-0.5 text-xs font-medium text-ink">{resolved}</span>}
         </div>
         <Actions market={market} user={user} canResolve={canResolve} />
         {market.type !== "POLL" && (
           <div className="surface mt-5 p-4">
-            <ProbChart points={market.points} answers={market.answers} type={market.type} />
+            <ProbChart
+              points={market.points}
+              answers={market.answers}
+              type={market.type}
+              markers={
+                user
+                  ? market.trades
+                      .filter((trade) => trade.user.username === user.username && trade.side !== "SUBSIDY")
+                      .map((trade) => ({
+                        t: new Date(trade.createdAt).getTime(),
+                        p: trade.probAfter,
+                        side: trade.side,
+                        outcome: trade.outcome,
+                        amount: trade.amount,
+                      }))
+                  : []
+              }
+            />
           </div>
+        )}
+        <Description text={market.description} />
+        {market.creatorBlocked && (
+          <p className="mt-3 text-sm text-secondary" data-testid="creator-block-notice">
+            The creator has blocked themselves from betting in this market.
+          </p>
         )}
         {market.type === "MULTIPLE" && !market.resolution && (
           <OutcomeBoard market={market} selected={answerId} onSelect={setAnswerId} />
@@ -67,6 +102,21 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
         {market.type === "POLL" && <PollBoard market={market} signedIn={Boolean(user)} />}
         {market.type === "BINARY" && <OrderBook book={market.orderBook} />}
         <Tabs market={market} signedIn={Boolean(user)} />
+        {market.related.length > 0 && (
+          <section className="mt-6" data-testid="related-markets">
+            <h2 className="text-sm font-medium text-ink">Related markets</h2>
+            <ul className="mt-2 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-card">
+              {market.related.map((item) => (
+                <li key={item.slug}>
+                  <Link href={`/market/${item.slug}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-pill">
+                    <span className="min-w-0 truncate text-ink">{item.question}</span>
+                    <span className="num shrink-0 rounded-full bg-pill px-2 py-0.5 text-xs text-ink">{formatPercent(item.probability)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
       {market.type !== "POLL" && (
       <aside className="hidden lg:block">
@@ -77,6 +127,7 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
             signedIn={Boolean(user)}
             selectedAnswerId={answerId}
             onSelectAnswer={setAnswerId}
+            blocked={blocked}
           />
         </div>
       </aside>
@@ -111,10 +162,67 @@ export function MarketView({ market, user }: { market: MarketDetail; user: Sessi
               signedIn={Boolean(user)}
               selectedAnswerId={answerId}
               onSelectAnswer={setAnswerId}
+              blocked={blocked}
             />
           </div>
         </div>
       )}
+      {subsidyOpen && <SubsidyModal slug={market.slug} balance={user?.balance ?? 0} onClose={() => setSubsidyOpen(false)} />}
+    </div>
+  );
+}
+
+function Description({ text }: { text: string }) {
+  const blocks = parseMarkdown(text);
+  const long = text.length > 280;
+  const [open, setOpen] = useState(false);
+  const shown = long && !open ? blocks.slice(0, 2) : blocks;
+  return (
+    <section className="surface mt-4 p-4" data-testid="resolution-criteria">
+      {shown.length ? <RichText blocks={shown} /> : <p className="whitespace-pre-wrap text-sm leading-relaxed text-secondary">{text}</p>}
+      {long && (
+        <button type="button" className="mt-3 text-sm text-ink underline decoration-line underline-offset-2" data-testid="description-toggle" onClick={() => setOpen((value) => !value)}>
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </section>
+  );
+}
+
+function SubsidyModal({ slug, balance, onClose }: { slug: string; balance: number; onClose: () => void }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [amount, setAmount] = useState("50");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit() {
+    setPending(true);
+    setError(null);
+    try {
+      await postJson(`/api/markets/${slug}/liquidity`, { amount: Number(amount) });
+      toast("Liquidity added");
+      onClose();
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add liquidity");
+      setPending(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end justify-center p-4 sm:items-center">
+      <button type="button" aria-label="Close add liquidity" className="absolute inset-0 scrim" onClick={onClose} />
+      <div className="surface relative z-10 w-full max-w-sm p-4" data-testid="liquidity-modal">
+        <h2 className="text-sm font-medium text-ink">Add liquidity</h2>
+        <p className="mt-1 text-sm text-secondary">This deepens the pool and leaves the probability where it is. You have {formatTp(balance)} TP.</p>
+        <input data-testid="liquidity-amount" value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" className="field num mt-3" />
+        {error && <p className="mt-2 text-sm text-no">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-primary" data-testid="liquidity-submit" disabled={pending} onClick={() => void submit()}>
+            {pending ? "Adding" : "Add liquidity"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -250,6 +358,7 @@ function Actions({ market, user, canResolve }: { market: MarketDetail; user: Ses
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [saved, setSaved] = useState(market.bookmarked);
 
   async function bookmark() {
@@ -262,14 +371,24 @@ function Actions({ market, user, canResolve }: { market: MarketDetail; user: Ses
     toast(result.saved ? "Saved to your portfolio" : "Removed from saved");
   }
 
-  async function share() {
-    const url = window.location.href;
+  async function copy(text: string, message: string) {
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(url);
-      toast("Link copied");
+      await navigator.clipboard.writeText(text);
+      copied = true;
     } catch {
-      toast(url);
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "true");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.appendChild(area);
+      area.select();
+      copied = document.execCommand("copy");
+      area.remove();
     }
+    toast(copied ? message : "Could not copy from this browser");
+    if (copied) setShareOpen(false);
   }
 
   return (
@@ -278,9 +397,26 @@ function Actions({ market, user, canResolve }: { market: MarketDetail; user: Ses
         <button type="button" onClick={() => void bookmark()} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
           {saved ? "Saved" : "Save"}
         </button>
-        <button type="button" onClick={() => void share()} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
-          Share
-        </button>
+        <div className="relative">
+          <button type="button" data-testid="share-open" onClick={() => setShareOpen((value) => !value)} className="btn h-8 border border-line bg-card px-3 text-xs text-ink hover:bg-pill">
+            Share
+          </button>
+          {shareOpen && (
+            <div className="absolute left-0 z-20 mt-1 w-44 rounded-xl border border-line bg-card p-1 shadow-card" data-testid="share-menu">
+              <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-pill" data-testid="share-link" onClick={() => void copy(window.location.href, "Link copied")}>
+                Copy link
+              </button>
+              <button
+                type="button"
+                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-pill"
+                data-testid="share-embed"
+                onClick={() => void copy(embedSnippet(window.location.origin, market.slug), "Embed code copied")}
+              >
+                Copy embed code
+              </button>
+            </div>
+          )}
+        </div>
         {canResolve && (
           <button type="button" data-testid="resolve-open" onClick={() => setOpen(true)} className="btn-primary h-8 px-3 text-xs">
             Resolve
@@ -445,113 +581,7 @@ function Tabs({ market, signedIn }: { market: MarketDetail; signedIn: boolean })
 }
 
 function Comments({ market, signedIn }: { market: MarketDetail; signedIn: boolean }) {
-  const router = useRouter();
-  const [body, setBody] = useState("");
-  const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  async function submit() {
-    if (!signedIn) {
-      router.push(`/signin?next=/market/${market.slug}`);
-      return;
-    }
-    setPending(true);
-    setError(null);
-    try {
-      await postJson(`/api/markets/${market.slug}/comments`, { body, parentId: replyTo?.id });
-      setBody("");
-      setReplyTo(null);
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not post");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        {replyTo && (
-          <div className="mb-2 flex items-center justify-between text-xs text-secondary">
-            Replying to {replyTo.name}
-            <button type="button" onClick={() => setReplyTo(null)} className="text-ink">
-              Cancel
-            </button>
-          </div>
-        )}
-        <textarea
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          placeholder={signedIn ? "Add a comment" : "Sign in to comment"}
-          className="field min-h-24"
-          data-testid="comment-body"
-        />
-        <div className="mt-2 flex items-center justify-between">
-          {error ? <p className="text-sm text-no">{error}</p> : <span />}
-          <button type="submit" disabled={pending || body.trim().length === 0} className="btn-primary h-9" data-testid="comment-submit">
-            {pending ? "Posting" : "Post"}
-          </button>
-        </div>
-      </form>
-      <div className="mt-5 space-y-5">
-        {market.comments.length === 0 && <p className="text-sm text-secondary">No comments yet.</p>}
-        {market.comments.map((comment) => (
-          <CommentItem key={comment.id} comment={comment} onReply={(id, name) => setReplyTo({ id, name })} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CommentItem({ comment, onReply }: { comment: CommentView; onReply: (id: string, name: string) => void }) {
-  return (
-    <article>
-      <div className="flex items-center gap-2 text-sm">
-        <Avatar name={comment.user.name} color={comment.user.avatarColor} size={24} />
-        <Link href={`/profile/${comment.user.username}`} className="font-medium text-ink hover:underline">
-          {comment.user.name}
-        </Link>
-        {comment.badge && (
-          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", comment.badge === "NO" ? "bg-noTint text-no" : "bg-yesTint text-yes")}>
-            {comment.badge}
-          </span>
-        )}
-        <span className="text-xs text-muted">{formatDateTime(comment.createdAt)}</span>
-      </div>
-      <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-ink">{comment.body}</p>
-      <button type="button" onClick={() => onReply(comment.id, comment.user.name)} className="mt-1 text-xs text-secondary hover:text-ink">
-        Reply
-      </button>
-      {comment.replies.length > 0 && (
-        <div className="mt-3 space-y-3 border-l border-line pl-4">
-          {comment.replies.map((reply) => (
-            <div key={reply.id}>
-              <div className="flex items-center gap-2 text-sm">
-                <Avatar name={reply.user.name} color={reply.user.avatarColor} size={20} />
-                <Link href={`/profile/${reply.user.username}`} className="font-medium text-ink hover:underline">
-                  {reply.user.name}
-                </Link>
-                {reply.badge && (
-                  <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", reply.badge === "NO" ? "bg-noTint text-no" : "bg-yesTint text-yes")}>
-                    {reply.badge}
-                  </span>
-                )}
-                <span className="text-xs text-muted">{formatDateTime(reply.createdAt)}</span>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{reply.body}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </article>
-  );
+  return <CommentThread market={market} signedIn={signedIn} />;
 }
 
 function Activity({ market }: { market: MarketDetail }) {
@@ -566,8 +596,9 @@ function Activity({ market }: { market: MarketDetail }) {
               <Link href={`/profile/${trade.user.username}`} className="font-medium hover:underline">
                 {trade.user.name}
               </Link>
+              {trade.user.isBot && <span className="rounded-full bg-pill px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-secondary">BOT</span>}
               <span className="text-secondary">
-                {trade.side === "BUY" ? "bought" : "sold"} {trade.outcome}
+                {trade.side === "SUBSIDY" ? "added liquidity" : `${trade.side === "BUY" ? "bought" : "sold"} ${trade.outcome}`}
               </span>
             </div>
             <div className="mt-1 pl-7 text-xs text-muted">{formatDateTime(trade.createdAt)}</div>
@@ -577,7 +608,7 @@ function Activity({ market }: { market: MarketDetail }) {
             <div className="text-xs text-secondary">
               {formatPercent(trade.probBefore, 1)} → {formatPercent(trade.probAfter, 1)}
             </div>
-            <div className="text-xs text-muted">{formatShares(trade.shares)} shares</div>
+            {trade.side !== "SUBSIDY" && <div className="text-xs text-muted">{formatShares(trade.shares)} shares</div>}
           </div>
         </li>
       ))}
@@ -623,6 +654,7 @@ function HolderColumn({ title, rows, tone }: { title: string; rows: MarketDetail
             <Link href={`/profile/${holder.user.username}`} className="flex items-center gap-2 hover:underline">
               <Avatar name={holder.user.name} color={holder.user.avatarColor} size={22} />
               {holder.user.name}
+              {holder.user.isBot && <span className="rounded-full bg-pill px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-secondary">BOT</span>}
             </Link>
             <span className="num text-secondary">{formatShares(holder.shares)}</span>
           </li>

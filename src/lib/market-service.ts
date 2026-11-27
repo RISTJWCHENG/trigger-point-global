@@ -13,7 +13,8 @@ import {
   type ResolveInput,
   type Wallet,
 } from "./ledger";
-import { quoteBinarySell, quoteMultiSell } from "./cpmm";
+import { binaryProbability, quoteBinarySell, quoteMultiSell } from "./cpmm";
+import { subsidizeBinary, subsidizeMulti } from "./liquidity";
 import { fillLimitOrders, type LimitOrderState } from "./limits";
 import { tallyPoll } from "./polls";
 
@@ -123,6 +124,7 @@ export async function createMarket(input: {
   ante: number;
   probability?: number;
   answers?: { text: string; probability?: number }[];
+  creatorBlocked?: boolean;
 }) {
   const question = input.question.trim().replace(/[ \t]+/g, " ");
   const description = input.description.trim();
@@ -203,6 +205,8 @@ export async function createMarket(input: {
         probability: ledger?.probability ?? 0,
         pot: ledger?.pot ?? 0,
         ante: isPoll ? 0 : input.ante,
+        liquidity: isPoll ? 0 : input.ante,
+        creatorBlocked: Boolean(input.creatorBlocked) && !isPoll,
         volume: 0,
         traderCount: 0,
         creatorId: creator.id,
@@ -229,6 +233,13 @@ export async function createMarket(input: {
   });
 }
 
+function assertCanTrade(userId: string, market: { creatorId: string; creatorBlocked: boolean; type: string }) {
+  if (market.type === "POLL") throw new TradeError("Polls take votes, not trades");
+  if (market.creatorBlocked && userId === market.creatorId) {
+    throw new TradeError("The creator has blocked themselves from betting in this market");
+  }
+}
+
 async function loadOpen(tx: Tx, slug: string) {
   const dbMarket = await tx.market.findUnique({
     where: { slug },
@@ -248,6 +259,7 @@ export async function placeBet(
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) throw new TradeError("Sign in required", 401);
     const dbMarket = await loadOpen(tx, slug);
+    assertCanTrade(userId, dbMarket);
     const market = toLedger(dbMarket);
     const wallet: Wallet = { id: user.id, balance: user.balance };
     const prior = await tx.trade.findFirst({ where: { marketId: market.id, userId }, select: { id: true } });
@@ -313,6 +325,7 @@ export async function sellShares(
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) throw new TradeError("Sign in required", 401);
     const dbMarket = await loadOpen(tx, slug);
+    assertCanTrade(userId, dbMarket);
     const market = toLedger(dbMarket);
     const wallet: Wallet = { id: user.id, balance: user.balance };
     const fill = sell(market, wallet, input);
@@ -499,6 +512,57 @@ function describeResolution(market: LedgerMarket, question: string) {
   return answer ? `${title} resolved to ${answer.text}.` : `${title} resolved.`;
 }
 
+export async function addLiquidity(userId: string, slug: string, amount: number) {
+  if (!Number.isFinite(amount) || amount < MIN_BET) throw new TradeError(`Minimum subsidy is ${MIN_BET} TP`);
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    if (user.balance + 1e-8 < amount) throw new TradeError("Not enough TP in your balance");
+    const dbMarket = await loadOpen(tx, slug);
+    if (dbMarket.resolution) throw new TradeError("This market is already resolved");
+    if (dbMarket.type === "POLL") throw new TradeError("Polls do not take liquidity");
+    const before = dbMarket.probability;
+    if (dbMarket.type === "MULTIPLE") {
+      const answers = [...dbMarket.answers].sort((a, b) => a.sortIndex - b.sortIndex);
+      const pools = subsidizeMulti(
+        answers.map((answer) => answer.pool),
+        amount,
+      );
+      for (let index = 0; index < answers.length; index += 1) {
+        await tx.answer.update({ where: { id: answers[index].id }, data: { pool: pools[index] } });
+      }
+    } else {
+      const next = subsidizeBinary({ yes: dbMarket.poolYes, no: dbMarket.poolNo, p: dbMarket.p }, amount);
+      await tx.market.update({
+        where: { id: dbMarket.id },
+        data: { poolYes: next.yes, poolNo: next.no, probability: binaryProbability(next) },
+      });
+    }
+    await tx.market.update({
+      where: { id: dbMarket.id },
+      data: { pot: dbMarket.pot + amount, liquidity: { increment: amount } },
+    });
+    await tx.user.update({ where: { id: userId }, data: { balance: user.balance - amount } });
+    const createdAt = new Date();
+    await tx.trade.create({
+      data: {
+        id: uid("trd"),
+        userId,
+        marketId: dbMarket.id,
+        outcome: "",
+        side: "SUBSIDY",
+        amount,
+        shares: 0,
+        probBefore: before,
+        probAfter: before,
+        createdAt,
+      },
+    });
+    await snapshotWorth(tx, userId);
+    return { probability: before, balance: user.balance - amount };
+  });
+}
+
 export async function postComment(userId: string, slug: string, body: string, parentId?: string | null) {
   const text = body.trim();
   if (text.length < 1 || text.length > 2000) throw new TradeError("Comments need between 1 and 2000 characters");
@@ -528,6 +592,35 @@ export async function postComment(userId: string, slug: string, body: string, pa
     });
   }
   return { id: comment.id };
+}
+
+export async function toggleCommentLike(userId: string, commentId: string) {
+  const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+  if (!comment || comment.deleted) throw new TradeError("That comment is no longer available", 404);
+  const existing = await prisma.commentLike.findUnique({ where: { userId_commentId: { userId, commentId } } });
+  if (existing) {
+    await prisma.commentLike.delete({ where: { userId_commentId: { userId, commentId } } });
+  } else {
+    await prisma.commentLike.create({ data: { userId, commentId } });
+  }
+  const likes = await prisma.commentLike.count({ where: { commentId } });
+  return { liked: !existing, likes };
+}
+
+export async function editComment(userId: string, commentId: string, body: string) {
+  const text = body.trim();
+  if (text.length < 1 || text.length > 2000) throw new TradeError("Comments need between 1 and 2000 characters");
+  const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+  if (!comment || comment.deleted || comment.userId !== userId) throw new TradeError("That comment is no longer available", 404);
+  const updated = await prisma.comment.update({ where: { id: commentId }, data: { body: text, editedAt: new Date() } });
+  return { id: updated.id, editedAt: updated.editedAt?.toISOString() ?? null };
+}
+
+export async function deleteComment(userId: string, commentId: string) {
+  const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+  if (!comment || comment.userId !== userId) throw new TradeError("That comment is no longer available", 404);
+  await prisma.comment.update({ where: { id: commentId }, data: { deleted: true, body: "" } });
+  return { deleted: true };
 }
 
 export async function toggleBookmark(userId: string, slug: string) {
@@ -641,6 +734,7 @@ export async function placeLimitOrder(
     const dbMarket = await loadOpen(tx, slug);
     if (dbMarket.resolution) throw new TradeError("This market is already resolved");
     if (dbMarket.type !== "BINARY") throw new TradeError("Limit orders are available on binary markets");
+    assertCanTrade(userId, dbMarket);
     const market = toLedger(dbMarket);
     await tx.user.update({ where: { id: user.id }, data: { balance: user.balance - amount } });
     const orderId = uid("ord");

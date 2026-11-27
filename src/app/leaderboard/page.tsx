@@ -81,6 +81,7 @@ export default async function LeaderboardPage({
                   <Link href={`/profile/${row.user.username}`} className="flex items-center gap-2 font-medium hover:underline">
                     <Avatar name={row.user.name} color={row.user.avatarColor} size={26} />
                     {row.user.name}
+                    {row.user.isBot && <span className="rounded-full bg-pill px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-secondary">BOT</span>}
                   </Link>
                 </td>
                 <td className={cn("num px-3 py-3", row.profit >= 0 ? "text-yes" : "text-no")}>{formatSignedTp(row.profit)}</td>

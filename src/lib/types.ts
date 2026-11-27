@@ -2,6 +2,7 @@ export type Creator = {
   username: string;
   name: string;
   avatarColor: string;
+  isBot?: boolean;
 };
 
 export type AnswerView = {
@@ -44,8 +45,14 @@ export type CommentView = {
   id: string;
   body: string;
   createdAt: string;
+  editedAt: string | null;
+  deleted: boolean;
+  likes: number;
+  liked: boolean;
+  mine: boolean;
   user: Creator;
   badge: string | null;
+  tradeNote: string | null;
   replies: CommentView[];
 };
 
@@ -82,7 +89,10 @@ export type MarketDetail = MarketCard & {
   p: number;
   ante: number;
   pot: number;
+  liquidity: number;
+  creatorBlocked: boolean;
   creatorId: string;
+  related: MarketCard[];
   resolvedAt: string | null;
   resolutionNote: string;
   bookmarked: boolean;

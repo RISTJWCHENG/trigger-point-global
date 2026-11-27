@@ -33,6 +33,9 @@ export function Shell({ user, children }: { user: ShellUser | null; children: Re
   const pathname = usePathname();
   const router = useRouter();
   const [toasts, setToasts] = useState<{ id: number; message: string }[]>([]);
+  if (pathname.startsWith("/embed/")) {
+    return <div className="min-h-screen bg-canvas text-ink">{children}</div>;
+  }
 
   function toast(message: string) {
     const id = Date.now() + Math.random();

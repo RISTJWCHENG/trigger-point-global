@@ -1,9 +1,10 @@
 import { afterAll, beforeEach, expect, it } from "vitest";
 import { registerUser } from "./auth";
 import { prisma } from "./db";
-import { createMarket, placeBet, sellShares, settleMarket } from "./market-service";
+import { addLiquidity, createMarket, deleteComment, editComment, placeBet, postComment, sellShares, settleMarket, toggleCommentLike } from "./market-service";
 
 async function reset() {
+  await prisma.commentLike.deleteMany();
   await prisma.limitOrder.deleteMany();
   await prisma.pollVote.deleteMany();
   await prisma.worthPoint.deleteMany();
@@ -140,4 +141,85 @@ it("cancels a market and returns the stake and the ante", async () => {
   await settleMarket(user.id, created.slug, { resolution: "CANCEL" });
   const updated = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   expect(updated.balance).toBeCloseTo(1000, 2);
+});
+
+it("adds liquidity without moving the probability or leaking TP", async () => {
+  const user = await registerUser({
+    username: "lio",
+    name: "Lio Marsh",
+    email: "lio@example.com",
+    password: "secret12",
+  });
+  const before = await wealth();
+  const created = await createMarket({
+    creatorId: user.id,
+    question: "Will a subsidy leave this price alone?",
+    description: "Adding liquidity should deepen the pool and keep the probability.",
+    type: "BINARY",
+    topic: "tech",
+    closeAt: future(),
+    ante: 100,
+    probability: 0.37,
+  });
+  const open = await prisma.market.findUniqueOrThrow({ where: { slug: created.slug } });
+  await placeBet(user.id, created.slug, { amount: 25, outcome: "YES" });
+  const moved = await prisma.market.findUniqueOrThrow({ where: { slug: created.slug } });
+  expect(moved.probability).toBeGreaterThan(open.probability);
+  await addLiquidity(user.id, created.slug, 60);
+  const deeper = await prisma.market.findUniqueOrThrow({ where: { slug: created.slug } });
+  expect(deeper.probability).toBeCloseTo(moved.probability, 8);
+  expect(deeper.poolYes).toBeGreaterThan(moved.poolYes);
+  expect(deeper.poolNo).toBeGreaterThan(moved.poolNo);
+  expect(deeper.liquidity).toBeCloseTo(moved.liquidity + 60, 4);
+  expect(await wealth()).toBeCloseTo(before, 2);
+});
+
+it("blocks the creator from betting when they opted out", async () => {
+  const user = await registerUser({
+    username: "nope",
+    name: "Nope Lane",
+    email: "nope@example.com",
+    password: "secret12",
+  });
+  const created = await createMarket({
+    creatorId: user.id,
+    question: "Will the creator stay out of this market?",
+    description: "The creator blocked themselves so a referee can resolve it.",
+    type: "BINARY",
+    topic: "tech",
+    closeAt: future(),
+    ante: 80,
+    probability: 0.5,
+    creatorBlocked: true,
+  });
+  await expect(placeBet(user.id, created.slug, { amount: 10, outcome: "YES" })).rejects.toThrow(/blocked themselves/);
+});
+
+it("likes, edits, and deletes a comment", async () => {
+  const user = await registerUser({
+    username: "cmt",
+    name: "Cmt Lane",
+    email: "cmt@example.com",
+    password: "secret12",
+  });
+  const created = await createMarket({
+    creatorId: user.id,
+    question: "Will comments keep their edits and likes?",
+    description: "A short market used only to hang a comment thread on.",
+    type: "BINARY",
+    topic: "tech",
+    closeAt: future(),
+    ante: 80,
+    probability: 0.5,
+  });
+  const comment = await postComment(user.id, created.slug, "First read of the criteria.");
+  const liked = await toggleCommentLike(user.id, comment.id);
+  expect(liked).toEqual({ liked: true, likes: 1 });
+  const cleared = await toggleCommentLike(user.id, comment.id);
+  expect(cleared).toEqual({ liked: false, likes: 0 });
+  const edited = await editComment(user.id, comment.id, "Revised read of the criteria.");
+  expect(edited.editedAt).toBeTruthy();
+  await deleteComment(user.id, comment.id);
+  const row = await prisma.comment.findUniqueOrThrow({ where: { id: comment.id } });
+  expect(row.deleted).toBe(true);
 });

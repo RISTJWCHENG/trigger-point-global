@@ -25,6 +25,7 @@ export function CreateForm({ balance }: { balance: number }) {
   const [odds, setOdds] = useState(["50", "50"]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [creatorBlocked, setCreatorBlocked] = useState(false);
 
   const oddsSum = useMemo(() => odds.reduce((sum, value) => sum + (Number(value) || 0), 0), [odds]);
 
@@ -40,6 +41,7 @@ export function CreateForm({ balance }: { balance: number }) {
         topic,
         closeAt: new Date(closeAt).toISOString(),
         ante: type === "POLL" ? 0 : Number(ante),
+        creatorBlocked: type !== "POLL" && creatorBlocked,
       };
       if (type === "BINARY") payload.probability = probability / 100;
       else {
@@ -212,6 +214,16 @@ export function CreateForm({ balance }: { balance: number }) {
           className="field num mt-1 max-w-[180px]"
         />
       </label>
+      )}
+
+      {type !== "POLL" && (
+        <label className="mt-4 flex items-start gap-2 text-sm text-secondary">
+          <input type="checkbox" className="mt-1" checked={creatorBlocked} onChange={(event) => setCreatorBlocked(event.target.checked)} data-testid="create-block" />
+          <span>
+            Block myself from betting on this market
+            <span className="mt-0.5 block text-xs text-muted">Useful when you want to resolve it without a position.</span>
+          </span>
+        </label>
       )}
 
       {error && <p className="mt-4 text-sm text-no">{error}</p>}

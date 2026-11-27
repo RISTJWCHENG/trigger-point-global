@@ -2,6 +2,8 @@ import { TOPICS } from "./constants";
 import { prisma } from "./db";
 import { quoteBinarySell, quoteMultiSell } from "./cpmm";
 import { aggregateOrderBook } from "./order-book";
+import { formatPercent, formatTp } from "./format";
+import { relatedMarkets } from "./related";
 import { tallyPoll } from "./polls";
 import type {
   AnswerView,
@@ -18,7 +20,7 @@ import type {
   TradeHistoryRow,
 } from "./types";
 
-const creatorSelect = { username: true, name: true, avatarColor: true } as const;
+const creatorSelect = { username: true, name: true, avatarColor: true, isBot: true } as const;
 
 type MarketRecord = {
   slug: string;
@@ -209,7 +211,10 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
       creator: { select: creatorSelect },
       answers: true,
       points: { orderBy: { createdAt: "asc" } },
-      comments: { include: { user: { select: creatorSelect } }, orderBy: { createdAt: "asc" } },
+      comments: {
+        include: { user: { select: creatorSelect }, likes: { select: { userId: true } } },
+        orderBy: { createdAt: "asc" },
+      },
       trades: { include: { user: { select: creatorSelect } }, orderBy: { createdAt: "desc" }, take: 80 },
       positions: { include: { user: { select: creatorSelect } } },
       limitOrders: {
@@ -240,10 +245,16 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
   for (const comment of market.comments) {
     views.set(comment.id, {
       id: comment.id,
-      body: comment.body,
+      body: comment.deleted ? "" : comment.body,
       createdAt: comment.createdAt.toISOString(),
+      editedAt: comment.editedAt?.toISOString() ?? null,
+      deleted: comment.deleted,
+      likes: comment.likes.length,
+      liked: viewerId ? comment.likes.some((like) => like.userId === viewerId) : false,
+      mine: comment.userId === viewerId,
       user: comment.user,
       badge: badgeFor(card.type, positions, card.answers, comment.userId),
+      tradeNote: tradeNoteFor(comment.userId, market.trades, market.limitOrders),
       replies: [],
     });
   }
@@ -288,7 +299,10 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
     p: market.p,
     ante: market.ante,
     pot: market.pot,
+    liquidity: market.liquidity,
+    creatorBlocked: market.creatorBlocked,
     creatorId: market.creatorId,
+    related: await getRelated(market.topic, market.slug),
     resolvedAt: market.resolvedAt?.toISOString() ?? null,
     resolutionNote: market.resolutionNote,
     bookmarked: market.bookmarks.length > 0,
@@ -336,6 +350,37 @@ export async function getMarket(slug: string, viewerId?: string | null): Promise
     ),
     myVote: market.pollVotes.find((vote) => vote.userId === viewerId)?.answerId ?? null,
   };
+}
+
+function stakeLabel(amount: number) {
+  const rounded = Math.round(amount);
+  return Math.abs(amount - rounded) < 0.05 ? String(rounded) : formatTp(amount);
+}
+
+function tradeNoteFor(
+  userId: string,
+  trades: { userId: string; side: string; outcome: string; amount: number; createdAt: Date }[],
+  orders: { userId: string; outcome: string; limitProb: number; remaining: number; createdAt: Date }[],
+) {
+  const trade = trades.find((item) => item.userId === userId && item.side !== "SUBSIDY");
+  const order = orders.find((item) => item.userId === userId && item.remaining > 0);
+  const tradeFirst = trade && (!order || trade.createdAt.getTime() >= order.createdAt.getTime());
+  if (trade && tradeFirst) {
+    const verb = trade.side === "BUY" ? "bought" : "sold";
+    return `${verb} ${stakeLabel(trade.amount)} TP ${trade.outcome}`;
+  }
+  if (order) return `opened a ${stakeLabel(order.remaining)} TP ${order.outcome} at ${formatPercent(order.limitProb)} order`;
+  return null;
+}
+
+export async function getRelated(topic: string, slug: string): Promise<MarketCard[]> {
+  const markets = await prisma.market.findMany({
+    where: { topic, slug: { not: slug }, resolution: null },
+    include: marketInclude,
+    orderBy: { volume: "desc" },
+    take: 8,
+  });
+  return relatedMarkets({ slug, topic }, markets.map(toCard), 4);
 }
 
 function safeSnapshot(raw: string): Record<string, number> {
@@ -576,7 +621,7 @@ export async function getLeaderboard(window: "all" | "week" | "month", metric: "
   const since =
     window === "week" ? new Date(Date.now() - 7 * 86_400_000) : window === "month" ? new Date(Date.now() - 30 * 86_400_000) : null;
   const users = await prisma.user.findMany({
-    select: { id: true, username: true, name: true, avatarColor: true, balance: true, startingBalance: true },
+    select: { id: true, username: true, name: true, avatarColor: true, isBot: true, balance: true, startingBalance: true },
   });
   const volumeGroups = await prisma.trade.groupBy({
     by: ["userId"],
@@ -612,7 +657,7 @@ export async function getLeaderboard(window: "all" | "week" | "month", metric: "
 
   const rows = users
     .map((user) => ({
-      user: { username: user.username, name: user.name, avatarColor: user.avatarColor },
+      user: { username: user.username, name: user.name, avatarColor: user.avatarColor, isBot: user.isBot },
       profit: profitOf.get(user.id) ?? 0,
       volume: volumeOf.get(user.id) ?? 0,
     }))

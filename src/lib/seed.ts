@@ -20,6 +20,7 @@ type SeedUser = Wallet & {
   avatarColor: string;
   startingBalance: number;
   isDemo: boolean;
+  isBot?: boolean;
   password: string;
   createdAt: Date;
 };
@@ -36,6 +37,7 @@ type Spec = {
   createdDaysAgo: number;
   closeInDays: number;
   closeOn?: string;
+  creatorBlocked?: boolean;
   trades: number;
   comments: { user: string; body: string; replyTo?: number; daysAgo: number }[];
   demo?: { amount: number; outcome?: "YES" | "NO"; answer?: string; daysAgo: number };
@@ -98,6 +100,7 @@ const users: Omit<SeedUser, "balance" | "createdAt">[] = [
   { id: "usr_amira", username: "amira", name: "Amira Hassan", email: "amira@triggerpoint.global", bio: "Geopolitics, slowly. I trade the calendar.", avatarColor: "#3A5348", startingBalance: 6500, isDemo: false, password: "amira" },
   { id: "usr_leo", username: "leo", name: "Leo Park", email: "leo@triggerpoint.global", bio: "Sports markets and mispriced 'other'.", avatarColor: "#4E5A46", startingBalance: 5000, isDemo: false, password: "leo" },
   { id: "usr_nora", username: "nora", name: "Nora Berg", email: "nora@triggerpoint.global", bio: "Science milestones. Patient bids.", avatarColor: "#5A4E46", startingBalance: 8500, isDemo: false, password: "nora" },
+  { id: "usr_calibrated", username: "calibrated", name: "Calibrated Desk", email: "calibrated@triggerpoint.global", bio: "A small automated desk. It fades prices that look overconfident.", avatarColor: "#3E4A55", startingBalance: 4000, isDemo: false, isBot: true, password: "calibrated" },
 ];
 
 const traderIds = users.filter((user) => user.username !== "demo").map((user) => user.id);
@@ -109,9 +112,10 @@ function specs(now: number): Spec[] {
       type: "BINARY",
       question: "Will the Fed cut the policy rate at least twice between December 2026 and June 2027?",
       description:
-        "Resolves YES if the Federal Reserve's target range for the federal funds rate is lowered at two or more scheduled FOMC meetings with decision dates from 1 December 2026 through 30 June 2027, inclusive.\n\nA cut is a lower upper bound of the target range versus the previous scheduled decision. Emergency intermeeting moves count. Holding the range steady does not. The source is the FOMC statement and implementation note on federalreserve.gov.",
+        "## Resolution criteria\n\nResolves **YES** if the Federal Reserve's target range for the federal funds rate is lowered at two or more scheduled FOMC meetings with decision dates from 1 December 2026 through 30 June 2027.\n\n- A cut is a lower upper bound than the previous scheduled decision.\n- Emergency intermeeting moves count.\n- Holding the range steady does not.\n\nThe source is the [FOMC calendar](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm).\n\n## Background\n\nThis prices the path of the policy rate, not a single meeting. Two cuts is a high bar if inflation stays sticky, and a low one if hiring cracks.\n\n*Play money only. The written criteria are the contract.*",
       topic: "Economics",
       creator: "usr_elena",
+      creatorBlocked: true,
       ante: 280,
       probability: 0.46,
       path: [0.46, 0.41, 0.33, 0.38, 0.52, 0.47, 0.44],
@@ -124,6 +128,7 @@ function specs(now: number): Spec[] {
         { user: "usr_demo", body: "Buying a little YES. Shelter inflation is the only piece that still looks sticky, and that lags.", daysAgo: 6 },
         { user: "usr_elena", body: "Shelter lags, but the committee has been explicit that they want more than one soft quarter. I wouldn't size this yet.", daysAgo: 5, replyTo: 1 },
         { user: "usr_jonas", body: "Close date is the June meeting. Worth remembering a July cut does not count.", daysAgo: 2 },
+        { user: "usr_calibrated", body: "The implied path is still a touch high versus the last dots. I faded a small NO.", daysAgo: 1 },
       ],
     },
     {
@@ -527,6 +532,26 @@ function specs(now: number): Spec[] {
         { user: "usr_sofia", body: "Cancelled. The session was pulled, so everyone gets their stake back.", daysAgo: 6 },
       ],
     },
+    {
+      slug: "resolution-log-2027",
+      type: "BINARY",
+      question: "Will the desk publish a public resolution log for every 2027 market?",
+      description:
+        "## Resolution criteria\n\nResolves **YES** if a public page lists the resolution source for every market that closed in 2027.\n\nThe creator has stayed out of the pool so the close can be called without a position.",
+      topic: "Tech",
+      creator: "usr_demo",
+      creatorBlocked: true,
+      ante: 80,
+      probability: 0.42,
+      path: [0.42, 0.46, 0.4, 0.44],
+      createdDaysAgo: 8,
+      closeInDays: 200,
+      closeOn: "2027-06-15T16:00:00.000Z",
+      trades: 14,
+      comments: [
+        { user: "usr_calibrated", body: "A written log is the whole product. Small YES.", daysAgo: 2 },
+      ],
+    },
   ];
 }
 
@@ -844,6 +869,7 @@ export async function seedDatabase() {
       bio: user.bio,
       avatarColor: user.avatarColor,
       isDemo: user.isDemo,
+      isBot: Boolean(user.isBot),
       createdAt: user.createdAt,
     })),
   });
@@ -868,6 +894,8 @@ export async function seedDatabase() {
       probability: market.probability,
       pot: market.pot,
       ante: market.ante,
+      liquidity: market.ante,
+      creatorBlocked: Boolean(spec.creatorBlocked),
       volume: market.volume,
       traderCount: market.traderIds.length,
       creatorId: spec.creator,
@@ -983,6 +1011,19 @@ export async function seedDatabase() {
     });
   }
   if (commentRows.length) await prisma.comment.createMany({ data: commentRows });
+  const edited = await prisma.comment.findFirst({
+    where: { marketId: "mkt_fed-cuts-june-2027", userId: "usr_marcus" },
+  });
+  if (edited) {
+    await prisma.comment.update({ where: { id: edited.id }, data: { editedAt: new Date(now - DAY) } });
+    await prisma.commentLike.createMany({
+      data: [
+        { userId: "usr_demo", commentId: edited.id },
+        { userId: "usr_elena", commentId: edited.id },
+        { userId: "usr_calibrated", commentId: edited.id },
+      ],
+    });
+  }
   if (notes.length) await prisma.notification.createMany({ data: notes });
 
   await prisma.bookmark.createMany({

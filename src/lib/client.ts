@@ -1,8 +1,8 @@
-export async function postJson<T>(url: string, body?: unknown): Promise<T> {
+export async function postJson<T>(url: string, body?: unknown, method: "POST" | "PATCH" | "DELETE" = "POST"): Promise<T> {
   const response = await fetch(url, {
-    method: "POST",
+    method,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body ?? {}),
+    body: method === "DELETE" ? undefined : JSON.stringify(body ?? {}),
   });
   const data = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new Error(data.error || "Request failed");

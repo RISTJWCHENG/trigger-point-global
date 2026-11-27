@@ -25,12 +25,14 @@ export function BetPanel({
   signedIn,
   selectedAnswerId,
   onSelectAnswer,
+  blocked = false,
 }: {
   market: MarketDetail;
   balance: number | null;
   signedIn: boolean;
   selectedAnswerId?: string;
   onSelectAnswer?: (id: string) => void;
+  blocked?: boolean;
 }) {
   const router = useRouter();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
@@ -48,6 +50,7 @@ export function BetPanel({
   const [amount, setAmount] = useState("50");
   const [shareText, setShareText] = useState("");
   const [pending, setPending] = useState(false);
+  const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -153,6 +156,10 @@ export function BetPanel({
           { amount: stake, outcome: market.type === "BINARY" ? outcome : undefined, answerId: market.type === "MULTIPLE" ? answerId : undefined },
         );
         setNote(`Filled ${formatShares(result.shares)} ${result.outcome} · now ${formatPercent(result.probAfter, 1)}`);
+        if (comment.trim()) {
+          await postJson(`/api/markets/${market.slug}/comments`, { body: comment.trim() });
+          setComment("");
+        }
         setAmount("50");
       } else {
         const result = await postJson<{ amount: number; probAfter: number; realizedPnl: number }>(`/api/markets/${market.slug}/sell`, {
@@ -169,6 +176,15 @@ export function BetPanel({
     } finally {
       setPending(false);
     }
+  }
+
+  if (blocked) {
+    return (
+      <section className="surface p-4" data-testid="bet-blocked">
+        <h2 className="text-sm font-medium text-ink">Betting closed for you</h2>
+        <p className="mt-2 text-sm leading-relaxed text-secondary">The creator has blocked themselves from betting in this market.</p>
+      </section>
+    );
   }
 
   if (resolved) {
@@ -359,6 +375,16 @@ export function BetPanel({
       )}
       {error && <p className="mt-3 text-sm text-no">{error}</p>}
       {note && <p className="mt-3 text-sm text-yes" data-testid="trade-note">{note}</p>}
+
+      {signedIn && side === "BUY" && orderType === "MARKET" && (
+        <input
+          value={comment}
+          onChange={(event) => setComment(event.target.value)}
+          placeholder="Comment with this trade"
+          className="field mt-3"
+          data-testid="bet-comment"
+        />
+      )}
 
       {signedIn ? (
         <button

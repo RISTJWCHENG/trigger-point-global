@@ -45,6 +45,6 @@ To reseed from scratch, stop the app, delete `prisma/dev.db`, and run `npm run s
 - Create a market, then resolve it YES, NO, at a percentage, to an answer, or N/A
 - Portfolio, public profiles, leaderboard, and notifications
 - Twenty seeded markets with historical trades so the charts are already alive
-- Binary limit orders with a public order book, free polls, a once-a-day 50 TP bonus, 24-hour movers, a portfolio net-worth chart, and a light or dark theme
+- Binary limit orders with a public order book, free polls, liquidity subsidies, comment likes, a once-a-day 50 TP bonus, 24-hour movers, a portfolio net-worth chart, and a light or dark theme
 
 The trading rules live in `src/lib/cpmm.ts` and `src/lib/ledger.ts`. Buys, sells, percentage resolutions, and cancellations conserve the supply of TP.

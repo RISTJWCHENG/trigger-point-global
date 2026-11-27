@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       ante?: number;
       probability?: number;
       answers?: { text?: string; probability?: number }[];
+      creatorBlocked?: boolean;
     };
     const result = await createMarket({
       creatorId: user.id,
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
       ante: Number(body.ante),
       probability: body.probability,
       answers: (body.answers ?? []).map((answer) => ({ text: answer.text ?? "", probability: answer.probability })),
+      creatorBlocked: Boolean(body.creatorBlocked),
     });
     return NextResponse.json(result);
   } catch (error) {

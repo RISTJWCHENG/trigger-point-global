@@ -1,34 +1,61 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { cn, formatDateTime, formatPercent } from "@/lib/format";
+import { cn, formatDateTime, formatPercent, formatTp } from "@/lib/format";
 import type { AnswerView, PointView } from "@/lib/types";
 
 const COLORS = ["var(--action)", "var(--yes)", "var(--no)", "#8C7355", "#5E7388", "#6E6A62", "#4F5E56", "#7A6A78"];
-const FRAMES = ["1D", "1W", "1M", "ALL"] as const;
+const FRAMES = ["1H", "6H", "1D", "1W", "1M", "ALL"] as const;
+const WINDOWS: Record<(typeof FRAMES)[number], number> = {
+  "1H": 3_600_000,
+  "6H": 6 * 3_600_000,
+  "1D": 86_400_000,
+  "1W": 7 * 86_400_000,
+  "1M": 30 * 86_400_000,
+  ALL: 0,
+};
+
+export type ChartMarker = { t: number; p: number; side: string; outcome: string; amount: number };
 
 export function ProbChart({
   points,
   answers,
   type,
+  markers = [],
+  showGraphToggle = true,
 }: {
   points: PointView[];
   answers: AnswerView[];
   type: "BINARY" | "MULTIPLE";
+  markers?: ChartMarker[];
+  showGraphToggle?: boolean;
 }) {
   const [frame, setFrame] = useState<(typeof FRAMES)[number]>("ALL");
+  const [graph, setGraph] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
+  const [markerHover, setMarkerHover] = useState<number | null>(null);
   const width = 640;
   const height = 220;
   const pad = { l: 36, r: 12, t: 16, b: 22 };
 
   const shown = useMemo(() => {
     const now = points.length ? points[points.length - 1].t : Date.now();
-    const windowMs = frame === "1D" ? 86_400_000 : frame === "1W" ? 7 * 86_400_000 : frame === "1M" ? 30 * 86_400_000 : 0;
+    const windowMs = WINDOWS[frame];
     const filtered = windowMs ? points.filter((point) => point.t >= now - windowMs) : points;
-    const source = filtered.length >= 2 ? filtered : points;
-    if (source.length === 1) return [source[0], { ...source[0], t: source[0].t + 1 }];
-    return source;
+    if (windowMs && filtered.length === 0 && points.length) {
+      const last = points[points.length - 1];
+      return [
+        { ...last, t: now - windowMs },
+        { ...last, t: now },
+      ];
+    }
+    if (filtered.length === 1) {
+      return [
+        { ...filtered[0], t: windowMs ? now - windowMs : filtered[0].t },
+        { ...filtered[0], t: filtered[0].t + 1 },
+      ];
+    }
+    return filtered.length ? filtered : points;
   }, [points, frame]);
 
   const series = useMemo(() => {
@@ -71,13 +98,27 @@ export function ProbChart({
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-medium text-ink">Probability</h2>
-        <div className="flex rounded-lg bg-pill p-0.5 text-xs">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-sm font-medium text-ink">Probability</h2>
+          {showGraphToggle && (
+            <label className="flex items-center gap-1.5 text-xs text-secondary">
+              <input
+                type="checkbox"
+                checked={graph}
+                onChange={(event) => setGraph(event.target.checked)}
+                data-testid="graph-positions"
+              />
+              Graph user positions
+            </label>
+          )}
+        </div>
+        <div className="no-scrollbar flex max-w-full overflow-x-auto rounded-lg bg-pill p-0.5 text-xs">
           {FRAMES.map((item) => (
             <button
               key={item}
               type="button"
+              data-testid={`chart-${item}`}
               onClick={() => setFrame(item)}
               className={cn("rounded-md px-2 py-1", frame === item ? "bg-card text-ink shadow-card" : "text-secondary")}
             >
@@ -124,6 +165,23 @@ export function ProbChart({
               vectorEffect="non-scaling-stroke"
             />
           ))}
+          {graph &&
+            markers
+              .filter((marker) => marker.t >= t0 && marker.t <= t1)
+              .map((marker, index) => (
+                <circle
+                  key={`${marker.t}-${index}`}
+                  cx={xAt(marker.t)}
+                  cy={yAt(marker.p)}
+                  r="4.5"
+                  data-testid="position-marker"
+                  fill={marker.side === "SELL" ? "var(--card)" : marker.outcome === "NO" ? "var(--no)" : "var(--yes)"}
+                  stroke={marker.outcome === "NO" ? "var(--no)" : "var(--yes)"}
+                  strokeWidth="1.6"
+                  onPointerEnter={() => setMarkerHover(index)}
+                  onPointerLeave={() => setMarkerHover(null)}
+                />
+              ))}
           {hoverPoint && (
             <line x1={hoverX} x2={hoverX} y1={pad.t} y2={height - pad.b} stroke="var(--muted)" strokeDasharray="3 3" />
           )}
@@ -140,6 +198,23 @@ export function ProbChart({
               />
             ))}
         </svg>
+        {graph && markerHover !== null && markers.filter((marker) => marker.t >= t0 && marker.t <= t1)[markerHover] && (
+          <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg border border-line bg-card px-2.5 py-2 text-xs shadow-card" data-testid="marker-tip">
+            {(() => {
+              const marker = markers.filter((item) => item.t >= t0 && item.t <= t1)[markerHover];
+              return (
+                <>
+                  <div className="text-ink">
+                    {marker.side === "SELL" ? "Sold" : "Bought"} {formatTp(marker.amount)} TP {marker.outcome}
+                  </div>
+                  <div className="text-secondary">
+                    {formatPercent(marker.p, 1)} · {formatDateTime(marker.t)}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
         {hoverPoint && (
           <div
             className="pointer-events-none absolute top-3 z-10 w-max max-w-[220px] rounded-lg border border-line bg-card px-2.5 py-2 text-xs shadow-card"

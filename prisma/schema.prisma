@@ -18,6 +18,7 @@ model User {
   bio             String   @default("")
   avatarColor     String
   isDemo          Boolean   @default(false)
+  isBot           Boolean   @default(false)
   lastBonusAt     DateTime?
   createdAt       DateTime  @default(now())
 
@@ -31,6 +32,7 @@ model User {
   limitOrders   LimitOrder[]
   pollVotes     PollVote[]
   worthPoints   WorthPoint[]
+  commentLikes  CommentLike[]
 }
 
 model Market {
@@ -54,6 +56,8 @@ model Market {
   ante           Float     @default(0)
   volume         Float     @default(0)
   traderCount    Int       @default(0)
+  liquidity      Float     @default(0)
+  creatorBlocked Boolean   @default(false)
   creatorId      String
   creator        User      @relation("CreatedMarkets", fields: [creatorId], references: [id])
 
@@ -174,8 +178,22 @@ model Comment {
   replies   Comment[] @relation("CommentReplies")
   body      String
   createdAt DateTime
+  editedAt  DateTime?
+  deleted   Boolean   @default(false)
+  likes     CommentLike[]
 
   @@index([marketId, createdAt])
+}
+
+model CommentLike {
+  userId    String
+  commentId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, commentId])
+  @@index([commentId])
 }
 
 model ProbPoint {
