@@ -1,0 +1,947 @@
+import type { Prisma } from "@prisma/client";
+import { MIN_ANTE, MIN_BET, TOPICS } from "./constants";
+import { prisma } from "./db";
+import { TradeError } from "./errors";
+import { slugify, uid } from "./format";
+import {
+  buy,
+  createBinaryMarket,
+  createMultiMarket,
+  resolveMarket,
+  sell,
+  type LedgerMarket,
+  type ResolveInput,
+  type Wallet,
+} from "./ledger";
+import { binaryProbability, quoteBinarySell, quoteMultiSell } from "./cpmm";
+import { subsidizeBinary, subsidizeMulti } from "./liquidity";
+import { fillLimitOrders, type LimitOrderState } from "./limits";
+import { tallyPoll } from "./polls";
+
+type Tx = Prisma.TransactionClient;
+
+type DbMarket = Prisma.MarketGetPayload<{ include: { answers: true; positions: true } }>;
+
+function toLedger(market: DbMarket): LedgerMarket {
+  const answers = [...market.answers].sort((a, b) => a.sortIndex - b.sortIndex);
+  return {
+    id: market.id,
+    type: market.type === "MULTIPLE" ? "MULTIPLE" : "BINARY",
+    poolYes: market.poolYes,
+    poolNo: market.poolNo,
+    p: market.p,
+    probability: market.probability,
+    pot: market.pot,
+    ante: market.ante,
+    volume: market.volume,
+    traderIds: [],
+    resolution: market.resolution,
+    resolutionProb: market.resolutionProb,
+    answers: answers.map((answer) => ({
+      id: answer.id,
+      text: answer.text,
+      pool: answer.pool,
+      probability: answer.probability,
+    })),
+    positions: market.positions.map((position) => ({
+      userId: position.userId,
+      answerId: position.answerId,
+      sharesYes: position.sharesYes,
+      sharesNo: position.sharesNo,
+      shares: position.shares,
+      invested: position.invested,
+      costBasisYes: position.costBasisYes,
+      costBasisNo: position.costBasisNo,
+      realizedPnl: position.realizedPnl,
+      payout: position.payout,
+    })),
+  };
+}
+
+async function saveMarketState(tx: Tx, market: LedgerMarket, traderDelta: number) {
+  await tx.market.update({
+    where: { id: market.id },
+    data: {
+      poolYes: market.poolYes,
+      poolNo: market.poolNo,
+      p: market.p,
+      probability: market.probability,
+      pot: market.pot,
+      volume: market.volume,
+      traderCount: { increment: traderDelta },
+      resolution: market.resolution,
+      resolutionProb: market.resolutionProb,
+      resolvedAt: market.resolution ? new Date() : null,
+    },
+  });
+  for (const answer of market.answers) {
+    await tx.answer.update({
+      where: { id: answer.id },
+      data: { pool: answer.pool, probability: answer.probability },
+    });
+  }
+}
+
+async function savePosition(tx: Tx, market: LedgerMarket, userId: string, answerId: string) {
+  const position = market.positions.find((item) => item.userId === userId && item.answerId === answerId);
+  if (!position) return;
+  await tx.position.upsert({
+    where: { userId_marketId_answerId: { userId, marketId: market.id, answerId } },
+    create: { id: uid("pos"), marketId: market.id, ...position },
+    update: {
+      sharesYes: position.sharesYes,
+      sharesNo: position.sharesNo,
+      shares: position.shares,
+      invested: position.invested,
+      costBasisYes: position.costBasisYes,
+      costBasisNo: position.costBasisNo,
+      realizedPnl: position.realizedPnl,
+      payout: position.payout,
+    },
+  });
+}
+
+function topicName(topic: string) {
+  const found = TOPICS.find((item) => item.id === topic || item.label.toLowerCase() === topic.toLowerCase());
+  if (!found || found.id === "all") throw new TradeError("Choose a topic");
+  return found.label;
+}
+
+async function uniqueSlug(tx: Tx, question: string) {
+  const base = slugify(question);
+  const taken = await tx.market.findUnique({ where: { slug: base }, select: { id: true } });
+  if (!taken) return base;
+  return `${base}-${uid().slice(0, 4)}`;
+}
+
+export async function createMarket(input: {
+  creatorId: string;
+  question: string;
+  description: string;
+  type: "BINARY" | "MULTIPLE" | "POLL";
+  topic: string;
+  closeAt: Date;
+  ante: number;
+  probability?: number;
+  answers?: { text: string; probability?: number }[];
+  creatorBlocked?: boolean;
+}) {
+  const question = input.question.trim().replace(/[ \t]+/g, " ");
+  const description = input.description.trim();
+  if (question.length < 10 || question.length > 180) {
+    throw new TradeError("Questions need between 10 and 180 characters");
+  }
+  if (description.length < 20 || description.length > 4000) {
+    throw new TradeError("Add resolution criteria of at least 20 characters");
+  }
+  if (!(input.closeAt instanceof Date) || Number.isNaN(input.closeAt.getTime())) {
+    throw new TradeError("Choose a close date");
+  }
+  if (input.closeAt.getTime() < Date.now() + 60 * 60 * 1000) {
+    throw new TradeError("Close the market at least an hour from now");
+  }
+  const isPoll = input.type === "POLL";
+  if (!isPoll && (!Number.isFinite(input.ante) || input.ante < MIN_ANTE)) {
+    throw new TradeError(`Liquidity ante must be at least ${MIN_ANTE} TP`);
+  }
+  const topic = topicName(input.topic);
+
+  return prisma.$transaction(async (tx) => {
+    const creator = await tx.user.findUnique({ where: { id: input.creatorId } });
+    if (!creator) throw new TradeError("Sign in required", 401);
+    if (!isPoll && creator.balance + 1e-8 < input.ante) throw new TradeError("Not enough TP for that ante");
+
+    const id = uid("mkt");
+    let ledger: LedgerMarket | null = null;
+    let answerRows: { id: string; text: string; sortIndex: number; pool: number; probability: number }[] = [];
+    if (isPoll) {
+      const answers = (input.answers ?? []).map((answer) => answer.text.trim()).filter(Boolean);
+      if (answers.length < 2) throw new TradeError("Add at least two choices");
+      answerRows = answers.map((text, index) => ({
+        id: uid("ans"),
+        text,
+        sortIndex: index,
+        pool: 0,
+        probability: 0,
+      }));
+    } else if (input.type === "MULTIPLE") {
+      const answers = (input.answers ?? []).map((answer) => ({ text: answer.text.trim(), probability: answer.probability }));
+      if (answers.length < 2) throw new TradeError("Add at least two answers");
+      if (answers.some((answer) => answer.text.length < 1 || answer.text.length > 80)) {
+        throw new TradeError("Each answer needs 1–80 characters");
+      }
+      const withIds = answers.map((answer) => ({ ...answer, id: uid("ans") }));
+      ledger = createMultiMarket(id, input.ante, withIds);
+      answerRows = ledger.answers.map((answer, index) => ({
+        id: answer.id,
+        text: answer.text,
+        sortIndex: index,
+        pool: answer.pool,
+        probability: answer.probability,
+      }));
+    } else {
+      const probability = input.probability ?? 0.5;
+      if (probability < 0.01 || probability > 0.99) throw new TradeError("Initial probability must be between 1% and 99%");
+      ledger = createBinaryMarket(id, input.ante, probability);
+    }
+
+    const slug = await uniqueSlug(tx, question);
+    if (!isPoll) {
+      await tx.user.update({ where: { id: creator.id }, data: { balance: creator.balance - input.ante } });
+    }
+    await tx.market.create({
+      data: {
+        id,
+        slug,
+        question,
+        description,
+        type: input.type,
+        topic,
+        closeAt: input.closeAt,
+        createdAt: new Date(),
+        poolYes: ledger?.poolYes ?? 0,
+        poolNo: ledger?.poolNo ?? 0,
+        p: ledger?.p ?? 0.5,
+        probability: ledger?.probability ?? 0,
+        pot: ledger?.pot ?? 0,
+        ante: isPoll ? 0 : input.ante,
+        liquidity: isPoll ? 0 : input.ante,
+        creatorBlocked: Boolean(input.creatorBlocked) && !isPoll,
+        volume: 0,
+        traderCount: 0,
+        creatorId: creator.id,
+      },
+    });
+    if (answerRows.length) {
+      await tx.answer.createMany({ data: answerRows.map((answer) => ({ ...answer, marketId: id })) });
+    }
+    if (ledger) {
+      await tx.probPoint.create({
+        data: {
+          id: uid("pt"),
+          marketId: id,
+          probability: ledger.probability,
+          snapshot:
+            input.type === "BINARY"
+              ? JSON.stringify({ YES: ledger.probability })
+              : JSON.stringify(Object.fromEntries(answerRows.map((answer) => [answer.id, answer.probability]))),
+          createdAt: new Date(),
+        },
+      });
+    }
+    return { slug, id };
+  });
+}
+
+function assertCanTrade(userId: string, market: { creatorId: string; creatorBlocked: boolean; type: string }) {
+  if (market.type === "POLL") throw new TradeError("Polls take votes, not trades");
+  if (market.creatorBlocked && userId === market.creatorId) {
+    throw new TradeError("The creator has blocked themselves from betting in this market");
+  }
+}
+
+async function loadOpen(tx: Tx, slug: string) {
+  const dbMarket = await tx.market.findUnique({
+    where: { slug },
+    include: { answers: true, positions: true },
+  });
+  if (!dbMarket) throw new TradeError("Market not found", 404);
+  return dbMarket;
+}
+
+export async function placeBet(
+  userId: string,
+  slug: string,
+  input: { amount: number; outcome?: "YES" | "NO"; answerId?: string },
+) {
+  if (!Number.isFinite(input.amount) || input.amount < MIN_BET) throw new TradeError(`Minimum bet is ${MIN_BET} TP`);
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    const dbMarket = await loadOpen(tx, slug);
+    assertCanTrade(userId, dbMarket);
+    const market = toLedger(dbMarket);
+    const wallet: Wallet = { id: user.id, balance: user.balance };
+    const prior = await tx.trade.findFirst({ where: { marketId: market.id, userId }, select: { id: true } });
+    const fill = buy(market, wallet, input);
+    await tx.user.update({ where: { id: user.id }, data: { balance: wallet.balance } });
+    await saveMarketState(tx, market, prior ? 0 : 1);
+    await savePosition(tx, market, user.id, fill.answerId);
+    const createdAt = new Date();
+    await tx.trade.create({
+      data: {
+        id: uid("trd"),
+        userId,
+        marketId: market.id,
+        answerId: fill.answerId,
+        outcome: fill.outcome,
+        side: "BUY",
+        amount: fill.amount,
+        shares: fill.shares,
+        probBefore: fill.probBefore,
+        probAfter: fill.probAfter,
+        createdAt,
+      },
+    });
+    await tx.probPoint.create({
+      data: {
+        id: uid("pt"),
+        marketId: market.id,
+        probability: fill.probAfter,
+        snapshot: fill.snapshot,
+        createdAt,
+      },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId,
+        type: "TRADE",
+        title: "Trade filled",
+        body: `Bought ${fill.shares.toFixed(1)} ${fill.outcome} for ${fill.amount.toFixed(2)} TP.`,
+        href: `/market/${dbMarket.slug}`,
+        createdAt,
+      },
+    });
+    await matchLimits(tx, market, dbMarket.slug);
+    await snapshotWorth(tx, userId);
+    return {
+      shares: fill.shares,
+      amount: fill.amount,
+      outcome: fill.outcome,
+      probBefore: fill.probBefore,
+      probAfter: fill.probAfter,
+      balance: wallet.balance,
+    };
+  });
+}
+
+export async function sellShares(
+  userId: string,
+  slug: string,
+  input: { shares: number; outcome?: "YES" | "NO"; answerId?: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    const dbMarket = await loadOpen(tx, slug);
+    assertCanTrade(userId, dbMarket);
+    const market = toLedger(dbMarket);
+    const wallet: Wallet = { id: user.id, balance: user.balance };
+    const fill = sell(market, wallet, input);
+    await tx.user.update({ where: { id: user.id }, data: { balance: wallet.balance } });
+    await saveMarketState(tx, market, 0);
+    await savePosition(tx, market, user.id, fill.answerId);
+    const createdAt = new Date();
+    await tx.trade.create({
+      data: {
+        id: uid("trd"),
+        userId,
+        marketId: market.id,
+        answerId: fill.answerId,
+        outcome: fill.outcome,
+        side: "SELL",
+        amount: fill.amount,
+        shares: fill.shares,
+        probBefore: fill.probBefore,
+        probAfter: fill.probAfter,
+        createdAt,
+      },
+    });
+    await tx.probPoint.create({
+      data: {
+        id: uid("pt"),
+        marketId: market.id,
+        probability: fill.probAfter,
+        snapshot: fill.snapshot,
+        createdAt,
+      },
+    });
+    if (Math.abs(fill.realizedPnl) > 1e-8) {
+      await tx.pnlEntry.create({
+        data: { id: uid("pnl"), userId, marketId: market.id, amount: fill.realizedPnl, createdAt },
+      });
+    }
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId,
+        type: "TRADE",
+        title: "Sale filled",
+        body: `Sold ${fill.shares.toFixed(1)} ${fill.outcome} for ${fill.amount.toFixed(2)} TP.`,
+        href: `/market/${dbMarket.slug}`,
+        createdAt,
+      },
+    });
+    await matchLimits(tx, market, dbMarket.slug);
+    await snapshotWorth(tx, userId);
+    return {
+      shares: fill.shares,
+      amount: fill.amount,
+      outcome: fill.outcome,
+      probBefore: fill.probBefore,
+      probAfter: fill.probAfter,
+      realizedPnl: fill.realizedPnl,
+      balance: wallet.balance,
+    };
+  });
+}
+
+export async function settleMarket(userId: string, slug: string, input: ResolveInput, note = "") {
+  return prisma.$transaction(async (tx) => {
+    const dbMarket = await tx.market.findUnique({
+      where: { slug },
+      include: { answers: true, positions: true },
+    });
+    if (!dbMarket) throw new TradeError("Market not found", 404);
+    if (dbMarket.creatorId !== userId) throw new TradeError("Only the market creator can resolve it", 403);
+    const openLimits = await tx.limitOrder.findMany({ where: { marketId: dbMarket.id, status: "OPEN" } });
+    const ids = [...new Set([dbMarket.creatorId, ...dbMarket.positions.map((position) => position.userId), ...openLimits.map((order) => order.userId)])];
+    const users = await tx.user.findMany({ where: { id: { in: ids } } });
+    const wallets = new Map<string, Wallet>(users.map((user) => [user.id, { id: user.id, balance: user.balance }]));
+    const market = toLedger(dbMarket);
+    for (const order of openLimits) {
+      const wallet = wallets.get(order.userId);
+      if (!wallet || order.remaining <= 0) continue;
+      wallet.balance += order.remaining;
+    }
+    if (openLimits.length) {
+      await tx.limitOrder.updateMany({
+        where: { marketId: dbMarket.id, status: "OPEN" },
+        data: { status: "CANCELLED", remaining: 0 },
+      });
+    }
+    const result = resolveMarket(market, wallets, dbMarket.creatorId, input);
+    const createdAt = new Date();
+    await tx.market.update({
+      where: { id: market.id },
+      data: {
+        poolYes: market.poolYes,
+        poolNo: market.poolNo,
+        probability: market.probability,
+        pot: 0,
+        resolution: market.resolution,
+        resolutionProb: market.resolutionProb,
+        resolutionNote: note.trim().slice(0, 500),
+        resolvedAt: createdAt,
+      },
+    });
+    for (const answer of market.answers) {
+      await tx.answer.update({
+        where: { id: answer.id },
+        data: { pool: answer.pool, probability: answer.probability },
+      });
+    }
+    for (const position of market.positions) {
+      await savePosition(tx, market, position.userId, position.answerId);
+    }
+    for (const user of users) {
+      const wallet = wallets.get(user.id);
+      if (!wallet) continue;
+      await tx.user.update({ where: { id: user.id }, data: { balance: wallet.balance } });
+    }
+    if (result.pnl.length) {
+      await tx.pnlEntry.createMany({
+        data: result.pnl.map((entry) => ({
+          id: uid("pnl"),
+          userId: entry.userId,
+          marketId: market.id,
+          amount: entry.amount,
+          createdAt,
+        })),
+      });
+    }
+    await tx.probPoint.create({
+      data: {
+        id: uid("pt"),
+        marketId: market.id,
+        probability: result.probability,
+        snapshot:
+          market.type === "BINARY"
+            ? JSON.stringify({ YES: result.probability })
+            : JSON.stringify(Object.fromEntries(market.answers.map((answer) => [answer.id, answer.probability]))),
+        createdAt,
+      },
+    });
+    const label = describeResolution(market, dbMarket.question);
+    const notified = new Set<string>();
+    for (const credit of result.credits) {
+      if (credit.role !== "trader" || notified.has(credit.userId)) continue;
+      notified.add(credit.userId);
+      await tx.notification.create({
+        data: {
+          id: uid("ntf"),
+          userId: credit.userId,
+          type: "RESOLUTION",
+          title: "Market resolved",
+          body:
+            credit.payout > 0.004
+              ? `${label} You were paid ${credit.payout.toFixed(2)} TP.`
+              : `${label} Your position paid out 0 TP.`,
+          href: `/market/${slug}`,
+          createdAt,
+        },
+      });
+    }
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId: dbMarket.creatorId,
+        type: "RESOLUTION",
+        title: "You resolved a market",
+        body: label,
+        href: `/market/${slug}`,
+        createdAt,
+      },
+    });
+    for (const id of wallets.keys()) await snapshotWorth(tx, id);
+    return { resolution: market.resolution, probability: result.probability };
+  });
+}
+
+function describeResolution(market: LedgerMarket, question: string) {
+  const title = `“${question}”`;
+  if (market.resolution === "YES") return `${title} resolved YES.`;
+  if (market.resolution === "NO") return `${title} resolved NO.`;
+  if (market.resolution === "CANCEL") return `${title} was cancelled and stakes were returned.`;
+  if (market.resolution === "MKT") {
+    if (market.type === "MULTIPLE") return `${title} resolved to a split.`;
+    return `${title} resolved at ${Math.round((market.resolutionProb ?? market.probability) * 100)}%.`;
+  }
+  const answer = market.answers.find((item) => item.id === market.resolution);
+  return answer ? `${title} resolved to ${answer.text}.` : `${title} resolved.`;
+}
+
+export async function addLiquidity(userId: string, slug: string, amount: number) {
+  if (!Number.isFinite(amount) || amount < MIN_BET) throw new TradeError(`Minimum subsidy is ${MIN_BET} TP`);
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    if (user.balance + 1e-8 < amount) throw new TradeError("Not enough TP in your balance");
+    const dbMarket = await loadOpen(tx, slug);
+    if (dbMarket.resolution) throw new TradeError("This market is already resolved");
+    if (dbMarket.type === "POLL") throw new TradeError("Polls do not take liquidity");
+    const before = dbMarket.probability;
+    if (dbMarket.type === "MULTIPLE") {
+      const answers = [...dbMarket.answers].sort((a, b) => a.sortIndex - b.sortIndex);
+      const pools = subsidizeMulti(
+        answers.map((answer) => answer.pool),
+        amount,
+      );
+      for (let index = 0; index < answers.length; index += 1) {
+        await tx.answer.update({ where: { id: answers[index].id }, data: { pool: pools[index] } });
+      }
+    } else {
+      const next = subsidizeBinary({ yes: dbMarket.poolYes, no: dbMarket.poolNo, p: dbMarket.p }, amount);
+      await tx.market.update({
+        where: { id: dbMarket.id },
+        data: { poolYes: next.yes, poolNo: next.no, probability: binaryProbability(next) },
+      });
+    }
+    await tx.market.update({
+      where: { id: dbMarket.id },
+      data: { pot: dbMarket.pot + amount, liquidity: { increment: amount } },
+    });
+    await tx.user.update({ where: { id: userId }, data: { balance: user.balance - amount } });
+    const createdAt = new Date();
+    await tx.trade.create({
+      data: {
+        id: uid("trd"),
+        userId,
+        marketId: dbMarket.id,
+        outcome: "",
+        side: "SUBSIDY",
+        amount,
+        shares: 0,
+        probBefore: before,
+        probAfter: before,
+        createdAt,
+      },
+    });
+    await snapshotWorth(tx, userId);
+    return { probability: before, balance: user.balance - amount };
+  });
+}
+
+export async function postComment(userId: string, slug: string, body: string, parentId?: string | null) {
+  const text = body.trim();
+  if (text.length < 1 || text.length > 2000) throw new TradeError("Comments need between 1 and 2000 characters");
+  const market = await prisma.market.findUnique({ where: { slug }, select: { id: true, question: true, slug: true } });
+  if (!market) throw new TradeError("Market not found", 404);
+  let parentAuthor: string | null = null;
+  if (parentId) {
+    const parent = await prisma.comment.findUnique({ where: { id: parentId } });
+    if (!parent || parent.marketId !== market.id) throw new TradeError("That comment is no longer available");
+    parentAuthor = parent.userId;
+  }
+  const comment = await prisma.comment.create({
+    data: { id: uid("cmt"), marketId: market.id, userId, parentId: parentId || null, body: text, createdAt: new Date() },
+  });
+  if (parentAuthor && parentAuthor !== userId) {
+    const author = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await prisma.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId: parentAuthor,
+        type: "REPLY",
+        title: "New reply",
+        body: `${author?.name ?? "Someone"} replied to your comment on “${market.question}”.`,
+        href: `/market/${market.slug}`,
+        createdAt: new Date(),
+      },
+    });
+  }
+  return { id: comment.id };
+}
+
+export async function toggleCommentLike(userId: string, commentId: string) {
+  const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+  if (!comment || comment.deleted) throw new TradeError("That comment is no longer available", 404);
+  const existing = await prisma.commentLike.findUnique({ where: { userId_commentId: { userId, commentId } } });
+  if (existing) {
+    await prisma.commentLike.delete({ where: { userId_commentId: { userId, commentId } } });
+  } else {
+    await prisma.commentLike.create({ data: { userId, commentId } });
+  }
+  const likes = await prisma.commentLike.count({ where: { commentId } });
+  return { liked: !existing, likes };
+}
+
+export async function editComment(userId: string, commentId: string, body: string) {
+  const text = body.trim();
+  if (text.length < 1 || text.length > 2000) throw new TradeError("Comments need between 1 and 2000 characters");
+  const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+  if (!comment || comment.deleted || comment.userId !== userId) throw new TradeError("That comment is no longer available", 404);
+  const updated = await prisma.comment.update({ where: { id: commentId }, data: { body: text, editedAt: new Date() } });
+  return { id: updated.id, editedAt: updated.editedAt?.toISOString() ?? null };
+}
+
+export async function deleteComment(userId: string, commentId: string) {
+  const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+  if (!comment || comment.userId !== userId) throw new TradeError("That comment is no longer available", 404);
+  await prisma.comment.update({ where: { id: commentId }, data: { deleted: true, body: "" } });
+  return { deleted: true };
+}
+
+export async function toggleBookmark(userId: string, slug: string) {
+  const market = await prisma.market.findUnique({ where: { slug }, select: { id: true } });
+  if (!market) throw new TradeError("Market not found", 404);
+  const existing = await prisma.bookmark.findUnique({
+    where: { userId_marketId: { userId, marketId: market.id } },
+  });
+  if (existing) {
+    await prisma.bookmark.delete({ where: { userId_marketId: { userId, marketId: market.id } } });
+    return { saved: false };
+  }
+  await prisma.bookmark.create({ data: { userId, marketId: market.id } });
+  return { saved: true };
+}
+
+export async function markNotificationsRead(userId: string, id?: string) {
+  await prisma.notification.updateMany({
+    where: { userId, ...(id ? { id } : {}), read: false },
+    data: { read: true },
+  });
+}
+
+async function matchLimits(tx: Tx, market: LedgerMarket, slug: string) {
+  if (market.type !== "BINARY" || market.resolution) return;
+  const rows = await tx.limitOrder.findMany({ where: { marketId: market.id, status: "OPEN" } });
+  if (!rows.length) return;
+  const users = await tx.user.findMany({ where: { id: { in: rows.map((row) => row.userId) } } });
+  const wallets = new Map<string, Wallet>(users.map((user) => [user.id, { id: user.id, balance: user.balance }]));
+  const orders: LimitOrderState[] = rows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    outcome: row.outcome === "NO" ? "NO" : "YES",
+    limitProb: row.limitProb,
+    remaining: row.remaining,
+    status: "OPEN",
+    createdAt: row.createdAt.getTime(),
+  }));
+  const fills = fillLimitOrders(market, wallets, orders);
+  if (!fills.length) return;
+  await saveMarketState(tx, market, 0);
+  for (const user of users) {
+    const wallet = wallets.get(user.id);
+    if (!wallet) continue;
+    await tx.user.update({ where: { id: user.id }, data: { balance: wallet.balance } });
+  }
+  for (const order of orders) {
+    await tx.limitOrder.update({
+      where: { id: order.id },
+      data: { remaining: order.remaining, status: order.status },
+    });
+  }
+  const touched = new Set<string>();
+  for (const fill of fills) {
+    if (touched.has(fill.userId)) continue;
+    touched.add(fill.userId);
+    await savePosition(tx, market, fill.userId, "");
+  }
+  const createdAt = new Date();
+  for (const fill of fills) {
+    await tx.trade.create({
+      data: {
+        id: uid("trd"),
+        userId: fill.userId,
+        marketId: market.id,
+        answerId: "",
+        outcome: fill.outcome,
+        side: "BUY",
+        amount: fill.amount,
+        shares: fill.shares,
+        probBefore: fill.probBefore,
+        probAfter: fill.probAfter,
+        createdAt,
+      },
+    });
+    await tx.probPoint.create({
+      data: { id: uid("pt"), marketId: market.id, probability: fill.probAfter, snapshot: fill.snapshot, createdAt },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId: fill.userId,
+        type: "TRADE",
+        title: "Limit order filled",
+        body: `Bought ${fill.shares.toFixed(1)} ${fill.outcome} for ${fill.amount.toFixed(2)} TP.`,
+        href: `/market/${slug}`,
+        createdAt,
+      },
+    });
+  }
+  for (const userId of touched) await snapshotWorth(tx, userId);
+}
+
+export async function placeLimitOrder(
+  userId: string,
+  slug: string,
+  input: { outcome?: "YES" | "NO"; limitProb: number; amount: number },
+) {
+  const amount = input.amount;
+  const limitProb = input.limitProb;
+  if (!Number.isFinite(amount) || amount < MIN_BET) throw new TradeError(`Minimum order is ${MIN_BET} TP`);
+  if (!Number.isFinite(limitProb) || limitProb < 0.01 || limitProb > 0.99) {
+    throw new TradeError("Limit probability must be between 1% and 99%");
+  }
+  if (input.outcome !== "YES" && input.outcome !== "NO") throw new TradeError("Choose YES or NO");
+  const outcome = input.outcome;
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    if (user.balance + 1e-8 < amount) throw new TradeError("Not enough TP in your balance");
+    const dbMarket = await loadOpen(tx, slug);
+    if (dbMarket.resolution) throw new TradeError("This market is already resolved");
+    if (dbMarket.type !== "BINARY") throw new TradeError("Limit orders are available on binary markets");
+    assertCanTrade(userId, dbMarket);
+    const market = toLedger(dbMarket);
+    await tx.user.update({ where: { id: user.id }, data: { balance: user.balance - amount } });
+    const orderId = uid("ord");
+    await tx.limitOrder.create({
+      data: {
+        id: orderId,
+        userId,
+        marketId: market.id,
+        outcome,
+        limitProb,
+        amount,
+        remaining: amount,
+        status: "OPEN",
+      },
+    });
+    await matchLimits(tx, market, slug);
+    await snapshotWorth(tx, userId);
+    const order = await tx.limitOrder.findUniqueOrThrow({ where: { id: orderId } });
+    const updated = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    return {
+      id: order.id,
+      status: order.status,
+      remaining: order.remaining,
+      limitProb: order.limitProb,
+      outcome: order.outcome,
+      balance: updated.balance,
+      probability: market.probability,
+    };
+  });
+}
+
+export async function cancelLimitOrderById(userId: string, orderId: string) {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.limitOrder.findUnique({ where: { id: orderId } });
+    if (!order || order.userId !== userId) throw new TradeError("Order not found", 404);
+    if (order.status !== "OPEN") throw new TradeError("That order is no longer open");
+    await tx.user.update({ where: { id: userId }, data: { balance: { increment: order.remaining } } });
+    await tx.limitOrder.update({ where: { id: orderId }, data: { status: "CANCELLED", remaining: 0 } });
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    return { balance: user.balance, refunded: order.remaining };
+  });
+}
+
+export async function voteOnPoll(userId: string, slug: string, answerId: string) {
+  const market = await prisma.market.findUnique({
+    where: { slug },
+    include: { answers: { orderBy: { sortIndex: "asc" } }, pollVotes: true },
+  });
+  if (!market) throw new TradeError("Market not found", 404);
+  if (market.type !== "POLL") throw new TradeError("This is not a poll");
+  if (market.resolution) throw new TradeError("This poll is closed");
+  if (!market.answers.some((answer) => answer.id === answerId)) throw new TradeError("Choose one of the options");
+  await prisma.pollVote.upsert({
+    where: { userId_marketId: { userId, marketId: market.id } },
+    create: { id: uid("vote"), userId, marketId: market.id, answerId, createdAt: new Date() },
+    update: { answerId },
+  });
+  const ballots = market.pollVotes
+    .filter((vote) => vote.userId !== userId)
+    .concat([{ userId, answerId, id: "", marketId: market.id, createdAt: new Date() }]);
+  return tallyPoll(
+    market.answers.map((answer) => answer.id),
+    ballots.map((vote) => ({ userId: vote.userId, answerId: vote.answerId })),
+  );
+}
+
+export async function setFollow(userId: string, username: string, follow: boolean) {
+  const target = await prisma.user.findUnique({ where: { username } });
+  if (!target) throw new TradeError("Trader not found", 404);
+  if (target.id === userId) throw new TradeError("You cannot follow yourself");
+  if (follow) {
+    await prisma.follow.upsert({
+      where: { followerId_followingId: { followerId: userId, followingId: target.id } },
+      create: { followerId: userId, followingId: target.id },
+      update: {},
+    });
+  } else {
+    await prisma.follow.deleteMany({ where: { followerId: userId, followingId: target.id } });
+  }
+  return { following: follow };
+}
+
+export async function sendTip(fromId: string, username: string, amount: number, note = "") {
+  if (!Number.isFinite(amount) || amount < MIN_BET) throw new TradeError(`Send at least ${MIN_BET} TP`);
+  const text = note.trim();
+  if (text.length > 280) throw new TradeError("Keep the note under 280 characters");
+  return prisma.$transaction(async (tx) => {
+    const from = await tx.user.findUnique({ where: { id: fromId } });
+    const to = await tx.user.findUnique({ where: { username } });
+    if (!from || !to) throw new TradeError("Trader not found", 404);
+    if (from.id === to.id) throw new TradeError("You cannot send TP to yourself");
+    if (from.balance + 1e-8 < amount) throw new TradeError("Not enough TP in your balance");
+    await tx.user.update({ where: { id: from.id }, data: { balance: from.balance - amount } });
+    await tx.user.update({ where: { id: to.id }, data: { balance: { increment: amount } } });
+    await tx.tip.create({
+      data: { id: uid("tip"), fromId: from.id, toId: to.id, amount, note: text, createdAt: new Date() },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId: to.id,
+        type: "TIP",
+        title: "TP received",
+        body: `${from.name} sent you ${amount.toFixed(2)} TP${text ? `: ${text}` : "."}`,
+        href: `/profile/${from.username}`,
+        createdAt: new Date(),
+      },
+    });
+    await snapshotWorth(tx, from.id);
+    await snapshotWorth(tx, to.id);
+    return { balance: from.balance - amount };
+  });
+}
+
+export async function updateMarketByCreator(
+  userId: string,
+  slug: string,
+  input: { description?: string; note?: string; closeAt?: string },
+) {
+  const market = await prisma.market.findUnique({ where: { slug } });
+  if (!market) throw new TradeError("Market not found", 404);
+  if (market.creatorId !== userId) throw new TradeError("Only the creator can edit this market", 403);
+  if (market.resolution) throw new TradeError("This market is already resolved");
+  const data: { description?: string; closeAt?: Date } = {};
+  const logs: { kind: string; body: string }[] = [];
+  if (input.description !== undefined) {
+    const description = input.description.trim();
+    if (description.length < 20 || description.length > 4000) {
+      throw new TradeError("Resolution criteria need between 20 and 4000 characters");
+    }
+    data.description = description;
+    logs.push({ kind: "description", body: "Resolution criteria were updated." });
+  }
+  const note = input.note?.trim() ?? "";
+  if (note) {
+    if (note.length > 2000) throw new TradeError("Keep the update under 2000 characters");
+    logs.push({ kind: "note", body: note });
+  }
+  if (input.closeAt) {
+    const closeAt = new Date(input.closeAt);
+    if (Number.isNaN(closeAt.getTime()) || closeAt.getTime() < Date.now() + 60 * 60 * 1000) {
+      throw new TradeError("Close the market at least an hour from now");
+    }
+    data.closeAt = closeAt;
+    logs.push({ kind: "close", body: `Close time set to ${closeAt.toISOString()}.` });
+  }
+  if (!logs.length && !data.description && !data.closeAt) throw new TradeError("Nothing to update");
+  await prisma.$transaction(async (tx) => {
+    if (Object.keys(data).length) await tx.market.update({ where: { id: market.id }, data });
+    if (logs.length) {
+      await tx.marketUpdate.createMany({
+        data: logs.map((log) => ({ id: uid("upd"), marketId: market.id, kind: log.kind, body: log.body, createdAt: new Date() })),
+      });
+    }
+  });
+  return { ok: true };
+}
+
+async function snapshotWorth(tx: Tx, userId: string) {
+  const user = await tx.user.findUnique({ where: { id: userId } });
+  if (!user) return;
+  const positions = await tx.position.findMany({
+    where: { userId },
+    include: { market: { include: { answers: true } } },
+  });
+  let marks = 0;
+  for (const position of positions) {
+    if (position.market.resolution || position.market.type === "POLL") continue;
+    if (position.market.type === "BINARY") {
+      const pool = { yes: position.market.poolYes, no: position.market.poolNo, p: position.market.p };
+      marks += quoteBinarySell(pool, "YES", position.sharesYes) + quoteBinarySell(pool, "NO", position.sharesNo);
+    } else {
+      const answers = [...position.market.answers].sort((a, b) => a.sortIndex - b.sortIndex);
+      const index = answers.findIndex((answer) => answer.id === position.answerId);
+      if (index >= 0) marks += quoteMultiSell({ pools: answers.map((answer) => answer.pool) }, index, position.shares);
+    }
+  }
+  await tx.worthPoint.create({
+    data: { id: uid("wth"), userId, worth: user.balance + marks, createdAt: new Date() },
+  });
+}
+
+export async function claimDailyBonus(userId: string) {
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new TradeError("Sign in required", 401);
+    if (user.lastBonusAt && user.lastBonusAt >= start) {
+      return { awarded: false, balance: user.balance, message: "Today's bonus is already claimed." };
+    }
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: { balance: user.balance + 50, lastBonusAt: new Date() },
+    });
+    await tx.notification.create({
+      data: {
+        id: uid("ntf"),
+        userId,
+        type: "BONUS",
+        title: "Daily bonus",
+        body: "50 TP added to your balance.",
+        href: "/portfolio",
+        createdAt: new Date(),
+      },
+    });
+    await snapshotWorth(tx, userId);
+    return { awarded: true, balance: updated.balance, message: "50 TP added." };
+  });
+}

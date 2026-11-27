@@ -1,0 +1,203 @@
+export type Creator = {
+  username: string;
+  name: string;
+  avatarColor: string;
+  isBot?: boolean;
+};
+
+export type AnswerView = {
+  id: string;
+  text: string;
+  probability: number;
+  pool: number;
+  votes: number;
+};
+
+export type MarketCard = {
+  slug: string;
+  question: string;
+  type: "BINARY" | "MULTIPLE" | "POLL";
+  topic: string;
+  probability: number;
+  volume: number;
+  traders: number;
+  closeAt: string;
+  createdAt: string;
+  resolution: string | null;
+  resolutionProb: number | null;
+  creator: Creator;
+  answers: AnswerView[];
+  change24h: number | null;
+  spark: number[];
+};
+
+export type HoldingView = {
+  answerId: string;
+  sharesYes: number;
+  sharesNo: number;
+  shares: number;
+  costBasisYes: number;
+  costBasisNo: number;
+  invested: number;
+};
+
+export type CommentView = {
+  id: string;
+  body: string;
+  createdAt: string;
+  editedAt: string | null;
+  deleted: boolean;
+  likes: number;
+  liked: boolean;
+  mine: boolean;
+  user: Creator;
+  badge: string | null;
+  tradeNote: string | null;
+  replies: CommentView[];
+};
+
+export type TradeView = {
+  id: string;
+  user: Creator;
+  outcome: string;
+  side: string;
+  amount: number;
+  shares: number;
+  probBefore: number;
+  probAfter: number;
+  createdAt: string;
+};
+
+export type HolderView = {
+  user: Creator;
+  side: string;
+  shares: number;
+  answerId: string;
+};
+
+export type PointView = {
+  t: number;
+  p: number;
+  snapshot: Record<string, number>;
+};
+
+export type MarketDetail = MarketCard & {
+  id: string;
+  description: string;
+  poolYes: number;
+  poolNo: number;
+  p: number;
+  ante: number;
+  pot: number;
+  liquidity: number;
+  creatorBlocked: boolean;
+  creatorId: string;
+  related: MarketCard[];
+  resolvedAt: string | null;
+  resolutionNote: string;
+  updates: { id: string; kind: string; body: string; createdAt: string }[];
+  bookmarked: boolean;
+  holdings: HoldingView[];
+  points: PointView[];
+  comments: CommentView[];
+  trades: TradeView[];
+  holders: HolderView[];
+  limitOrders: LimitOrderView[];
+  orderBook: { yes: { limitProb: number; amount: number }[]; no: { limitProb: number; amount: number }[] };
+  myVote: string | null;
+};
+
+export type LimitOrderView = {
+  id: string;
+  user: Creator;
+  outcome: string;
+  limitProb: number;
+  remaining: number;
+  mine: boolean;
+};
+
+export type PositionRow = {
+  slug: string;
+  question: string;
+  topic: string;
+  type: "BINARY" | "MULTIPLE" | "POLL";
+  side: string;
+  outcome: "YES" | "NO" | null;
+  answerId: string;
+  shares: number;
+  mark: number;
+  cost: number;
+  pnl: number;
+  resolved: boolean;
+};
+
+export type TradeHistoryRow = {
+  id: string;
+  slug: string;
+  question: string;
+  outcome: string;
+  side: string;
+  amount: number;
+  shares: number;
+  probBefore: number;
+  probAfter: number;
+  createdAt: string;
+};
+
+export type PortfolioData = {
+  user: Creator & { username: string; bio: string; createdAt: string; balance: number; startingBalance: number };
+  isOwn: boolean;
+  followers: number;
+  following: number;
+  viewerFollows: boolean;
+  netWorth: number;
+  cash: number;
+  positionValue: number;
+  profit: number;
+  volume: number;
+  positions: PositionRow[];
+  settled: PositionRow[];
+  trades: TradeHistoryRow[];
+  created: MarketCard[];
+  saved: MarketCard[];
+  worth: { t: number; worth: number }[];
+};
+
+export type LeaderRow = {
+  rank: number;
+  user: Creator;
+  profit: number;
+  volume: number;
+};
+
+export type NotificationView = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  href: string;
+  read: boolean;
+  createdAt: string;
+};
+
+export type RailTrade = {
+  id: string;
+  username: string;
+  name: string;
+  avatarColor: string;
+  slug: string;
+  question: string;
+  side: string;
+  outcome: string;
+  amount: number;
+  createdAt: string;
+};
+
+export type TopicSummary = {
+  id: string;
+  label: string;
+  blurb: string;
+  count: number;
+  open: number;
+  volume: number;
+};
